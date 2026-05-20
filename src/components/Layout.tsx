@@ -16,7 +16,7 @@ export default function Layout({ children }: { children: ReactNode }) {
             </div>
             <div>
               <div className="text-sm text-slate-500">קרן רש"י</div>
-              <div className="font-semibold leading-tight">מסלול</div>
+              <div className="font-semibold leading-tight">בוט ניתוב פניות</div>
             </div>
           </Link>
           {user && (

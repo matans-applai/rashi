@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import Layout from "../components/Layout";
 import { getRequest, updateLegalIntake, uploadFiles } from "../lib/requests";
 import { useAuth } from "../lib/auth";
+import { buildLegalIntakePrefill, prefilledKeys } from "../lib/prefill";
 import type { LegalIntakePayload, RequestRecord } from "../lib/types";
 
 export default function LegalIntake() {
@@ -11,6 +12,9 @@ export default function LegalIntake() {
   const nav = useNavigate();
   const [req, setReq] = useState<RequestRecord | null>(null);
   const [data, setData] = useState<LegalIntakePayload>({});
+  const [prefilled, setPrefilled] = useState<Set<keyof LegalIntakePayload>>(
+    new Set()
+  );
   const [extraFiles, setExtraFiles] = useState<File[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -19,9 +23,21 @@ export default function LegalIntake() {
     if (!id) return;
     getRequest(id).then((r) => {
       setReq(r);
-      if (r?.legal_intake) setData(r.legal_intake);
+      if (!r) return;
+      if (r.legal_intake) {
+        // Returning visit — show what was saved last time, as-is.
+        setData(r.legal_intake);
+        setPrefilled(new Set());
+      } else {
+        // First entry — prefill from the request so the user doesn't retype.
+        const initial = buildLegalIntakePrefill(r);
+        setData(initial);
+        setPrefilled(prefilledKeys(initial));
+      }
     });
   }, [id]);
+
+  const prefilledCount = prefilled.size;
 
   function set<K extends keyof LegalIntakePayload>(key: K, value: LegalIntakePayload[K]) {
     setData((d) => ({ ...d, [key]: value }));
@@ -204,6 +220,12 @@ export default function LegalIntake() {
         </div>
       )}
 
+      {prefilledCount > 0 && (
+        <div className="rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 p-4 text-sm mb-3">
+          <span className="font-semibold">{prefilledCount} שדות מולאו אוטומטית</span>{" "}
+          לפי תיאור הפנייה והפרטים שמסרת. ניתן לערוך כל שדה לפני שליחה.
+        </div>
+      )}
       <div className="rounded-xl bg-blue-50 border border-blue-200 text-blue-900 p-4 text-sm mb-5">
         אפשר לשלוח גם עם מידע חלקי. ככל שיש יותר פרטים — קל יותר למחלקה המשפטית להתקדם מהר.
       </div>

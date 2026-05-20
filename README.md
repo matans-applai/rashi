@@ -1,4 +1,4 @@
-# RASHI-BOT — קרן רש"י, בוט אינטייק משפטי (POC)
+# RASHI-BOT — קרן רש"י, בוט ניתוב פניות (POC)
 
 POC קצר ועברי-RTL לעובדי קרן רש"י: פתיחת פנייה לגבי התקשרות עם ספק / יועץ / שירות,
 העלאת מסמכים, סיווג ראשוני אוטומטי, והעברה (במידת הצורך) לבדיקה משפטית קצרה.
@@ -93,6 +93,13 @@ src/
 עריכת מילות מפתח: ערכו את המערכים `LEGAL_KEYWORDS`, `SUPPLIER_REG_KEYWORDS`, `INSURANCE_TAG_RULES`.
 
 ---
+
+## POC test scenarios
+
+קובץ תרחישי בדיקה ידנית, בעברית RTL, עם הקלט המדויק לכל תרחיש והסיווג הצפוי:
+[`docs/rashi-poc-test-scenarios.md`](docs/rashi-poc-test-scenarios.md)
+
+מכסה את כל חמשת המסלולים (`general_terms`, `supplier_registration`, `insurance_required`, `legal_review`, `missing_info`), כולל תרחישי `legal_review` עם prefill אוטומטי של טופס ה-intake המשפטי וגם תרחיש שמדגים את סדר העדיפויות (legal_review > insurance_required).
 
 ## מגבלות POC
 

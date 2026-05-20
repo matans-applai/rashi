@@ -34,7 +34,7 @@ export default function Login() {
           </div>
           <div>
             <div className="text-sm text-slate-500">קרן רש"י</div>
-            <div className="text-lg font-semibold">מסלול</div>
+            <div className="text-lg font-semibold">בוט ניתוב פניות</div>
           </div>
         </div>
 
