@@ -1,0 +1,78 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply bg-slate-50 text-slate-900 font-sans antialiased;
+  font-family: "Heebo", "Rubik", ui-sans-serif, system-ui, "Segoe UI", Arial,
+    sans-serif;
+}
+
+input,
+textarea,
+select,
+button {
+  font-family: inherit;
+}
+
+/* RTL-aware form controls baseline */
+.input {
+  @apply w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm
+         focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100
+         placeholder:text-slate-400;
+}
+
+.label {
+  @apply mb-1 block text-sm font-medium text-slate-700;
+}
+
+.btn {
+  @apply inline-flex items-center justify-center rounded-lg px-4 py-2 text-sm font-medium
+         transition focus:outline-none focus:ring-2 focus:ring-offset-1 disabled:opacity-60 disabled:cursor-not-allowed;
+}
+
+.btn-primary {
+  @apply btn bg-brand-600 text-white hover:bg-brand-700 focus:ring-brand-500;
+}
+
+.btn-secondary {
+  @apply btn bg-white text-slate-700 border border-slate-300 hover:bg-slate-50 focus:ring-slate-300;
+}
+
+.btn-ghost {
+  @apply btn bg-transparent text-brand-700 hover:bg-brand-50 focus:ring-brand-200;
+}
+
+.card {
+  @apply bg-white rounded-2xl shadow-card border border-slate-100 p-6;
+}
+
+.tag {
+  @apply inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700;
+}
+
+.tag-blue {
+  @apply tag bg-blue-50 text-blue-700;
+}
+
+.tag-amber {
+  @apply tag bg-amber-50 text-amber-700;
+}
+
+.tag-red {
+  @apply tag bg-red-50 text-red-700;
+}
+
+.tag-green {
+  @apply tag bg-emerald-50 text-emerald-700;
+}
+
+.tag-violet {
+  @apply tag bg-violet-50 text-violet-700;
+}

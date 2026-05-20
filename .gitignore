@@ -1,0 +1,20 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+*.tsbuildinfo
+
+# env / secrets — do NOT commit
+.env
+.env.local
+.env.*.local
+
+# editor / OS
+.DS_Store
+*.log
+.vscode/
+.idea/
+
+# claude state
+.claude/
