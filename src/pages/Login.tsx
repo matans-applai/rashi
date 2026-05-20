@@ -34,7 +34,7 @@ export default function Login() {
           </div>
           <div>
             <div className="text-sm text-slate-500">קרן רש"י</div>
-            <div className="text-lg font-semibold">בוט אינטייק משפטי</div>
+            <div className="text-lg font-semibold">מסלול</div>
           </div>
         </div>
 
@@ -93,9 +93,6 @@ export default function Login() {
           </form>
         </div>
 
-        <p className="text-xs text-slate-400 text-center mt-6">
-          אין הרשמה עצמית. משתמשי דמו נוצרים ידנית.
-        </p>
       </div>
     </div>
   );

@@ -16,7 +16,7 @@ export default function Layout({ children }: { children: ReactNode }) {
             </div>
             <div>
               <div className="text-sm text-slate-500">קרן רש"י</div>
-              <div className="font-semibold leading-tight">בוט אינטייק משפטי</div>
+              <div className="font-semibold leading-tight">מסלול</div>
             </div>
           </Link>
           {user && (
@@ -38,9 +38,6 @@ export default function Layout({ children }: { children: ReactNode }) {
         </div>
       </header>
       <main className="max-w-6xl mx-auto px-6 py-8">{children}</main>
-      <footer className="max-w-6xl mx-auto px-6 py-8 text-xs text-slate-400">
-        POC • הסיווג הראשוני מתבסס כעת על חוקים דטרמיניסטיים. ניתן להחליף בקלות במודל LLM.
-      </footer>
     </div>
   );
 }
