@@ -1,9 +1,17 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import Layout from "../components/Layout";
-import { fileSignedUrl, getRequest, markSentToLegal } from "../lib/requests";
+import {
+  fileSignedUrl,
+  getRequest,
+  markSentToLegal,
+  updateRequestClassification,
+} from "../lib/requests";
 import type { RequestRecord } from "../lib/types";
 import { OutcomeBadge, StatusBadge } from "../components/OutcomeBadge";
+import { classifyRequest } from "../lib/classifier";
+import { buildRequestUnderstanding } from "../lib/insights";
+import { SUPPLIER_REGISTRATION_URL } from "../lib/links";
 
 export default function RequestSummary() {
   const { id } = useParams();
@@ -11,11 +19,17 @@ export default function RequestSummary() {
   const [req, setReq] = useState<RequestRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [editingDescription, setEditingDescription] = useState(false);
+  const [descriptionDraft, setDescriptionDraft] = useState("");
+  const [savingDescription, setSavingDescription] = useState(false);
 
   useEffect(() => {
     if (!id) return;
     getRequest(id)
-      .then((r) => setReq(r))
+      .then((r) => {
+        setReq(r);
+        setDescriptionDraft(r?.description ?? "");
+      })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }, [id]);
@@ -24,17 +38,37 @@ export default function RequestSummary() {
   if (error) return <Layout><ErrorBox msg={error} /></Layout>;
   if (!req) return <Layout><ErrorBox msg="לא נמצאה פנייה" /></Layout>;
 
-  const outcome = req.outcome;
-  const showLegalCta =
-    outcome === "legal_review" ||
-    outcome === "supplier_registration" ||
-    outcome === "insurance_required" ||
-    outcome === "general_terms";
-
   async function sendDirectlyToLegal() {
     if (!req) return;
     await markSentToLegal(req.id);
     nav(`/requests/${req.id}/sent`);
+  }
+
+  async function saveDescription() {
+    if (!req) return;
+    setSavingDescription(true);
+    setError(null);
+    try {
+      const classification = classifyRequest({
+        department: req.department,
+        description: descriptionDraft,
+        supplierName: req.supplier_name ?? "",
+        amount: req.amount,
+        fileCount: req.file_paths.length,
+      });
+      const updated = await updateRequestClassification({
+        id: req.id,
+        description: descriptionDraft,
+        classification,
+      });
+      setReq(updated);
+      setDescriptionDraft(updated.description);
+      setEditingDescription(false);
+    } catch (e: any) {
+      setError(e?.message ?? "שגיאה בעדכון התיאור");
+    } finally {
+      setSavingDescription(false);
+    }
   }
 
   return (
@@ -56,31 +90,19 @@ export default function RequestSummary() {
         <div className="lg:col-span-2 space-y-6">
           <RecommendationCard req={req} />
 
-          <div className="card">
-            <h2 className="font-semibold mb-3">מה המערכת הבינה</h2>
-            <dl className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
-              <Field label="מיזם / מחלקה" value={req.department} />
-              <Field label="ספק" value={req.supplier_name || "לא צויין"} />
-              <Field
-                label="סכום משוער"
-                value={
-                  req.amount != null
-                    ? `${req.amount.toLocaleString("he-IL")} ₪`
-                    : "לא צויין"
-                }
-              />
-              <Field
-                label="קבצים מצורפים"
-                value={req.file_paths.length ? `${req.file_paths.length}` : "אין"}
-              />
-              <div className="sm:col-span-2">
-                <div className="text-slate-500 mb-1">תיאור</div>
-                <div className="bg-slate-50 rounded-lg p-3 text-slate-800 whitespace-pre-wrap">
-                  {req.description}
-                </div>
-              </div>
-            </dl>
-          </div>
+          <UnderstandingCard
+            req={req}
+            editingDescription={editingDescription}
+            descriptionDraft={descriptionDraft}
+            savingDescription={savingDescription}
+            onEdit={() => setEditingDescription(true)}
+            onCancel={() => {
+              setDescriptionDraft(req.description);
+              setEditingDescription(false);
+            }}
+            onDescriptionChange={setDescriptionDraft}
+            onSave={saveDescription}
+          />
 
           {req.file_paths.length > 0 && (
             <FilesCard paths={req.file_paths} />
@@ -88,18 +110,6 @@ export default function RequestSummary() {
         </div>
 
         <div className="space-y-6">
-          <div className="card">
-            <h2 className="font-semibold mb-3">תגיות שזוהו</h2>
-            <div className="flex flex-wrap gap-2">
-              {(req.tags ?? []).length === 0 && (
-                <span className="text-slate-400 text-sm">אין תגיות</span>
-              )}
-              {(req.tags ?? []).map((t) => (
-                <span key={t} className="tag-blue">{t}</span>
-              ))}
-            </div>
-          </div>
-
           <div className="card">
             <h2 className="font-semibold mb-3">הפעולות הבאות</h2>
             <NextActions req={req} onSendToLegal={sendDirectlyToLegal} />
@@ -116,6 +126,106 @@ export default function RequestSummary() {
         </div>
       </div>
     </Layout>
+  );
+}
+
+function UnderstandingCard({
+  req,
+  editingDescription,
+  descriptionDraft,
+  savingDescription,
+  onEdit,
+  onCancel,
+  onDescriptionChange,
+  onSave,
+}: {
+  req: RequestRecord;
+  editingDescription: boolean;
+  descriptionDraft: string;
+  savingDescription: boolean;
+  onEdit: () => void;
+  onCancel: () => void;
+  onDescriptionChange: (value: string) => void;
+  onSave: () => void;
+}) {
+  const understanding = buildRequestUnderstanding(req);
+
+  return (
+    <div className="card">
+      <div className="flex items-center justify-between gap-3 mb-4">
+        <h2 className="font-semibold">מה המערכת הבינה</h2>
+        {!editingDescription && (
+          <button type="button" className="btn-ghost" onClick={onEdit}>
+            ערוך תיאור
+          </button>
+        )}
+      </div>
+
+      <dl className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm mb-5">
+        {understanding.facts.map((item) => (
+          <Field key={item.label} label={item.label} value={item.value} />
+        ))}
+      </dl>
+
+      <div className="rounded-xl bg-slate-50 border border-slate-100 p-4 mb-4">
+        <div className="text-sm font-medium text-slate-700 mb-2">
+          תובנות מתוך המלל החופשי
+        </div>
+        <ul className="list-disc pr-5 text-sm text-slate-700 space-y-1">
+          {understanding.observations.map((item) => (
+            <li key={item}>{item}</li>
+          ))}
+        </ul>
+      </div>
+
+      {understanding.missing.length > 0 && (
+        <div className="rounded-xl bg-amber-50 border border-amber-200 p-4 mb-4">
+          <div className="text-sm font-medium text-amber-900 mb-2">
+            פרטים שכדאי להשלים בהמשך
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {understanding.missing.map((item) => (
+              <span key={item} className="tag-amber">
+                {item}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div>
+        <div className="text-sm font-medium text-slate-700 mb-2">
+          התיאור המקורי
+        </div>
+        {editingDescription ? (
+          <div className="space-y-3">
+            <textarea
+              className="input min-h-[150px]"
+              value={descriptionDraft}
+              onChange={(e) => onDescriptionChange(e.target.value)}
+              autoComplete="off"
+            />
+            <div className="flex justify-end gap-2">
+              <button type="button" className="btn-secondary" onClick={onCancel}>
+                ביטול
+              </button>
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={onSave}
+                disabled={savingDescription || !descriptionDraft.trim()}
+              >
+                {savingDescription ? "שומר ומנתח..." : "שמור ונתח מחדש"}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="bg-white rounded-lg border border-slate-200 p-3 text-sm text-slate-800 whitespace-pre-wrap">
+            {req.description}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -144,7 +254,7 @@ function outcomeMessage(req: RequestRecord): string {
     case "legal_review":
       return "לפי המידע שהוזן, נראה שהפנייה כוללת רכיב שמצריך בדיקה משפטית. מומלץ להשלים פרטים נוספים כדי לקדם את הטיפול, או לשלוח את הפנייה עם המידע שהוזן עד כה.";
     case "supplier_registration":
-      return "נראה שהספק אינו רשום במאגר 2026 או שסטטוס הרישום שלו אינו ברור. יש להשלים רישום ספק לפני המשך התקשרות.";
+      return "רשומת עבר: פתיחת ספק חדש מתבצעת כיום דרך הקישור ליד שדה הספק בטופס הפנייה.";
     case "insurance_required":
       return "לפי תיאור הפעילות, נראה שנדרש אישור ביטוח מתאים לפני המשך התקשרות.";
     case "general_terms":
@@ -193,7 +303,7 @@ function NextActions({
       <div className="space-y-2">
         <a
           className="btn-primary w-full"
-          href="https://example.com/supplier-registration"
+          href={SUPPLIER_REGISTRATION_URL}
           target="_blank"
           rel="noreferrer"
         >
@@ -228,14 +338,14 @@ function NextActions({
     <div className="space-y-2">
       <a
         className="btn-primary w-full"
-        href="/files/general-terms-placeholder.txt"
+        href="/files/rashi-supplier-selection-protocol.docx"
         target="_blank"
         rel="noreferrer"
       >
-        הורד מסמך תנאי התקשרות
+        הורד פרוטוקול בחירת ספק
       </a>
       <p className="text-xs text-slate-400">
-        בשלב POC זה קובץ פלייסהולדר. ניתן להחליפו במסמך התנאים הרשמי.
+        טופס רכש כללי מתוך מסמכי הקרן. לא נמצא בקבצים שצורפו טופס ביטוח ייעודי.
       </p>
       <button
         className="btn-secondary w-full"

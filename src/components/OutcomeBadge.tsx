@@ -2,7 +2,7 @@ import type { RoutingOutcome, RequestStatus } from "../lib/types";
 
 const OUTCOME_LABEL: Record<RoutingOutcome, string> = {
   general_terms: "תנאי התקשרות רגילים",
-  supplier_registration: "רישום ספק נדרש",
+  supplier_registration: "רישום ספק (ישן)",
   insurance_required: "נדרש אישור ביטוח",
   legal_review: "בדיקה משפטית",
   missing_info: "חסר מידע",

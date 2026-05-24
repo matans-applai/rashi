@@ -17,7 +17,7 @@ create table if not exists public.requests (
   supplier_name text,
   amount        numeric,
   file_paths    text[] not null default '{}',
-  outcome       text,         -- general_terms | supplier_registration | insurance_required | legal_review | missing_info
+  outcome       text,         -- general_terms | insurance_required | legal_review | missing_info (supplier_registration may exist in legacy POC rows)
   status        text not null default 'classified', -- draft | classified | sent_to_legal | completed
   reasoning     text,
   tags          text[],

@@ -73,6 +73,28 @@ export async function listMyRequests(userId: string): Promise<RequestRecord[]> {
   return (data ?? []) as RequestRecord[];
 }
 
+export async function deleteRequest(req: RequestRecord): Promise<void> {
+  const paths = [
+    ...req.file_paths,
+    ...(req.legal_intake?.extraFilePaths ?? []),
+  ];
+  if (paths.length > 0) {
+    const { error: storageError } = await supabase.storage
+      .from(FILES_BUCKET)
+      .remove(paths);
+    if (storageError) {
+      // Deleting the request is still useful even if old attachments remain.
+      console.warn("Could not delete request files", storageError);
+    }
+  }
+
+  const { error } = await supabase
+    .from(REQUESTS_TABLE)
+    .delete()
+    .eq("id", req.id);
+  if (error) throw error;
+}
+
 export async function getRequest(id: string): Promise<RequestRecord | null> {
   const { data, error } = await supabase
     .from(REQUESTS_TABLE)
@@ -90,6 +112,29 @@ export async function updateLegalIntake(
   const { data, error } = await supabase
     .from(REQUESTS_TABLE)
     .update({ legal_intake: payload })
+    .eq("id", id)
+    .select("*")
+    .single();
+  if (error) throw error;
+  return data as RequestRecord;
+}
+
+export async function updateRequestClassification(args: {
+  id: string;
+  description: string;
+  classification: ClassificationResult;
+}): Promise<RequestRecord> {
+  const { id, description, classification } = args;
+  const { data, error } = await supabase
+    .from(REQUESTS_TABLE)
+    .update({
+      description,
+      outcome: classification.outcome,
+      reasoning: classification.reasoning,
+      tags: classification.tags,
+      legal_intake: null,
+      status: "classified" as RequestStatus,
+    })
     .eq("id", id)
     .select("*")
     .single();

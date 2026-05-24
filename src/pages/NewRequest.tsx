@@ -4,7 +4,8 @@ import Layout from "../components/Layout";
 import { useAuth } from "../lib/auth";
 import { classifyRequest } from "../lib/classifier";
 import { createRequest, uploadFiles } from "../lib/requests";
-import { DEMO_SUPPLIERS } from "../lib/suppliers";
+import { SUPPLIER_REGISTRATION_URL } from "../lib/links";
+import SupplierTypeahead from "../components/SupplierTypeahead";
 
 export default function NewRequest() {
   const { user } = useAuth();
@@ -79,7 +80,7 @@ export default function NewRequest() {
         </p>
       </div>
 
-      <form onSubmit={handleSubmit} className="card space-y-5">
+      <form onSubmit={handleSubmit} className="card space-y-5" autoComplete="off">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
           <div>
             <label className="label" htmlFor="dep">
@@ -91,26 +92,30 @@ export default function NewRequest() {
               value={department}
               onChange={(e) => setDepartment(e.target.value)}
               placeholder="לדוגמה: יום גיבוש לעובדים, שותפויות"
+              autoComplete="off"
               required
             />
           </div>
           <div>
-            <label className="label" htmlFor="supplier">
-              שם ספק, אם ידוע
-            </label>
-            <input
+            <div className="mb-1 flex items-center justify-between gap-3">
+              <label className="label mb-0" htmlFor="supplier">
+                שם ספק, אם ידוע
+              </label>
+              <a
+                className="text-xs font-medium text-brand-700 hover:text-brand-800 hover:underline"
+                href={SUPPLIER_REGISTRATION_URL}
+                target="_blank"
+                rel="noreferrer"
+              >
+                לא מוצאים את הספק? פתחו ספק חדש
+              </a>
+            </div>
+            <SupplierTypeahead
               id="supplier"
-              className="input"
               value={supplierName}
-              onChange={(e) => setSupplierName(e.target.value)}
-              placeholder="לדוגמה: ODT ישראל"
-              list="supplier-list"
+              onChange={setSupplierName}
+              placeholder="התחילו להקליד שם או קטגוריה (לדוגמה: ODT, קייטרינג)"
             />
-            <datalist id="supplier-list">
-              {DEMO_SUPPLIERS.map((s) => (
-                <option key={s.name} value={s.name} />
-              ))}
-            </datalist>
           </div>
         </div>
 
@@ -124,6 +129,7 @@ export default function NewRequest() {
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="ספרו בקצרה: מה מטרת ההתקשרות, מי הספק, מה תוכן הפעילות..."
+            autoComplete="off"
             required
           />
         </div>
@@ -141,6 +147,7 @@ export default function NewRequest() {
               onChange={(e) => setAmountStr(e.target.value)}
               placeholder="50,000"
               inputMode="numeric"
+              autoComplete="off"
             />
           </div>
           <div>

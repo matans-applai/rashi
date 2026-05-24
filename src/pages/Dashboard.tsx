@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import Layout from "../components/Layout";
 import { useAuth, getUserDisplayName } from "../lib/auth";
-import { listMyRequests } from "../lib/requests";
+import { deleteRequest, listMyRequests } from "../lib/requests";
 import type { RequestRecord } from "../lib/types";
 import { OutcomeBadge, StatusBadge } from "../components/OutcomeBadge";
 
@@ -12,6 +12,8 @@ export default function Dashboard() {
   const [items, setItems] = useState<RequestRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showAll, setShowAll] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -20,6 +22,23 @@ export default function Dashboard() {
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }, [user]);
+
+  const visibleItems = showAll ? items : items.slice(0, 3);
+
+  async function handleDelete(req: RequestRecord) {
+    const ok = window.confirm("למחוק את הפנייה הזו? לא ניתן לשחזר אותה לאחר המחיקה.");
+    if (!ok) return;
+    setDeletingId(req.id);
+    setError(null);
+    try {
+      await deleteRequest(req);
+      setItems((current) => current.filter((item) => item.id !== req.id));
+    } catch (e: any) {
+      setError(e?.message ?? "שגיאה במחיקת הפנייה");
+    } finally {
+      setDeletingId(null);
+    }
+  }
 
   return (
     <Layout>
@@ -64,7 +83,7 @@ export default function Dashboard() {
                 </tr>
               </thead>
               <tbody>
-                {items.map((r) => (
+                {visibleItems.map((r) => (
                   <tr key={r.id} className="border-t border-slate-100 align-top">
                     <td className="py-3 pl-4 text-slate-600 whitespace-nowrap">
                       {new Date(r.created_at).toLocaleDateString("he-IL")}
@@ -84,17 +103,38 @@ export default function Dashboard() {
                       <OutcomeBadge outcome={r.outcome} />
                     </td>
                     <td className="py-3">
-                      <Link
-                        to={`/requests/${r.id}`}
-                        className="btn-ghost"
-                      >
-                        פתח
-                      </Link>
+                      <div className="flex items-center gap-2">
+                        <Link
+                          to={`/requests/${r.id}`}
+                          className="btn-ghost"
+                        >
+                          פתח
+                        </Link>
+                        <button
+                          type="button"
+                          className="btn-ghost text-red-700 hover:bg-red-50 focus:ring-red-200"
+                          onClick={() => handleDelete(r)}
+                          disabled={deletingId === r.id}
+                        >
+                          {deletingId === r.id ? "מוחק..." : "מחק"}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            {items.length > 3 && (
+              <div className="border-t border-slate-100 pt-4 mt-2 flex justify-center">
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => setShowAll((v) => !v)}
+                >
+                  {showAll ? "הצג רק 3 אחרונות" : `הצג עוד ${items.length - 3} פניות`}
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>

@@ -47,15 +47,6 @@ const LEGAL_KEYWORDS = [
   "200 אלף",
 ];
 
-const SUPPLIER_REG_KEYWORDS = [
-  "לא במאגר",
-  "לא רשום",
-  "ספק חדש",
-  "לפתוח ספק",
-  "לא יודע אם במאגר",
-  "מאגר 2026",
-];
-
 interface InsuranceTagRule {
   tag: string;
   keywords: string[];
@@ -142,42 +133,9 @@ export function classifyRequest(
     };
   }
 
-  // ---------- Priority 3: supplier_registration ----------
-  const supplierHits = findMatches(haystack, SUPPLIER_REG_KEYWORDS);
   const supplier = lookupSupplier(input.supplierName);
-  const dbSaysUnregistered = supplier?.status === "not_registered";
-  if (supplierHits.length > 0 || dbSaysUnregistered) {
-    return {
-      outcome: "supplier_registration",
-      message:
-        "נראה שהספק אינו רשום במאגר 2026 או שסטטוס הרישום שלו אינו ברור. יש להשלים רישום ספק לפני המשך התקשרות.",
-      reasoning: buildReasoning("supplier_registration", {
-        supplierHits,
-        supplierName: input.supplierName,
-        supplierStatus: supplier?.status,
-      }),
-      tags: dedupe([
-        "רישום ספק",
-        ...(dbSaysUnregistered ? ["ספק לא רשום במאגר"] : []),
-        ...supplierHits,
-      ]),
-      matchedKeywords: dedupe([
-        ...supplierHits,
-        ...(dbSaysUnregistered ? ["סטטוס מאגר: לא רשום"] : []),
-      ]),
-      supplierStatus: supplier?.status,
-      nextActions: [
-        {
-          label: "פתח קישור רישום ספק",
-          href: "https://example.com/supplier-registration",
-          kind: "primary",
-        },
-        { label: "בכל זאת העבר לבדיקה משפטית", kind: "secondary" },
-      ],
-    };
-  }
 
-  // ---------- Priority 4: insurance_required ----------
+  // ---------- Priority 3: insurance_required ----------
   const insuranceTags: string[] = [];
   const insuranceHits: string[] = [];
   for (const rule of INSURANCE_TAG_RULES) {
@@ -205,20 +163,20 @@ export function classifyRequest(
     };
   }
 
-  // ---------- Priority 5: general_terms ----------
+  // ---------- Priority 4: general_terms ----------
   return {
     outcome: "general_terms",
     message:
       "לפי המידע שהוזן, נראה שניתן להתקדם במסלול תנאי התקשרות רגילים. יש לוודא שהספק רשום במאגר ושאין תנאים חריגים נוספים.",
     reasoning:
       "לא זוהו טריגרים משפטיים, רישומיים או ביטוחיים בתיאור הפנייה. הפנייה מתאימה למסלול תנאי התקשרות רגילים.",
-    tags: ["תנאי התקשרות רגילים"],
+    tags: [],
     matchedKeywords: [],
     supplierStatus: supplier?.status,
     nextActions: [
       {
-        label: "הורד מסמך תנאי התקשרות",
-        href: "/files/general-terms-placeholder.txt",
+        label: "הורד פרוטוקול בחירת ספק",
+        href: "/files/rashi-supplier-selection-protocol.docx",
         kind: "primary",
       },
       { label: "בכל זאת העבר לבדיקה משפטית", kind: "secondary" },
@@ -250,18 +208,6 @@ function buildReasoning(
     if (ctx.amountTriggers?.length) {
       parts.push(
         "הסכום שהוזן עומד או עולה על סף של 200,000 ₪ ולכן מצריך בדיקה משפטית."
-      );
-    }
-  }
-  if (outcome === "supplier_registration") {
-    if (ctx.supplierStatus === "not_registered") {
-      parts.push(
-        `הספק "${ctx.supplierName}" אינו רשום במאגר 2026 לפי הנתונים שבמערכת.`
-      );
-    }
-    if (ctx.supplierHits?.length) {
-      parts.push(
-        `זוהו ביטויים המעידים על ספק שאינו רשום: ${ctx.supplierHits.join(", ")}.`
       );
     }
   }

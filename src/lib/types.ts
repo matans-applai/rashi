@@ -1,7 +1,7 @@
 export type RoutingOutcome =
   | "missing_info"
   | "legal_review"
-  | "supplier_registration"
+  | "supplier_registration" // Legacy records only; new supplier setup is a link, not a route.
   | "insurance_required"
   | "general_terms";
 
