@@ -106,7 +106,7 @@ export default function RequestSummary() {
     try {
       const updated = await markSentToLegal(req.id);
       setReq(updated);
-      nav(`/requests/${req.id}/confirm`);
+      nav(`/chat/${req.id}`);
     } catch (e: any) {
       setError(e?.message ?? "שגיאה");
     } finally {
@@ -158,7 +158,7 @@ export default function RequestSummary() {
           <button
             type="button"
             className="btn-secondary"
-            onClick={() => nav("/dashboard")}
+            onClick={() => nav("/chat")}
           >
             ← חזרה לפניות
           </button>
@@ -181,9 +181,9 @@ export default function RequestSummary() {
           <button
             type="button"
             className="btn-secondary"
-            onClick={() => nav("/requests/new")}
+            onClick={() => nav(id ? `/chat/${id}` : "/chat")}
           >
-            חזור לעריכת תיאור חופשי
+            חזור לשיחה
           </button>
           <button
             type="button"

@@ -11,7 +11,7 @@ export default function LegalIntake() {
   const nav = useNavigate();
   useEffect(() => {
     if (id) nav(`/requests/${id}`, { replace: true });
-    else nav("/dashboard", { replace: true });
+    else nav("/chat", { replace: true });
   }, [id, nav]);
   return null;
 }

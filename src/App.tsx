@@ -3,10 +3,8 @@ import { AuthProvider, useAuth } from "./lib/auth";
 import Login from "./pages/Login";
 import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
-import Dashboard from "./pages/Dashboard";
-import NewRequest from "./pages/NewRequest";
+import ChatWorkspace from "./pages/ChatWorkspace";
 import RequestSummary from "./pages/RequestSummary";
-import LegalIntake from "./pages/LegalIntake";
 import LegalConfirmation from "./pages/LegalConfirmation";
 
 function RequireAuth({ children }: { children: JSX.Element }) {
@@ -30,10 +28,27 @@ export default function App() {
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route
+          path="/chat"
+          element={
+            <RequireAuth>
+              <ChatWorkspace />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/chat/:id"
+          element={
+            <RequireAuth>
+              <ChatWorkspace />
+            </RequireAuth>
+          }
+        />
+        {/* Legacy routes redirect to workspace */}
+        <Route
           path="/dashboard"
           element={
             <RequireAuth>
-              <Dashboard />
+              <Navigate to="/chat" replace />
             </RequireAuth>
           }
         />
@@ -41,7 +56,7 @@ export default function App() {
           path="/requests/new"
           element={
             <RequireAuth>
-              <NewRequest />
+              <Navigate to="/chat" replace />
             </RequireAuth>
           }
         />
@@ -50,14 +65,6 @@ export default function App() {
           element={
             <RequireAuth>
               <RequestSummary />
-            </RequireAuth>
-          }
-        />
-        <Route
-          path="/requests/:id/legal"
-          element={
-            <RequireAuth>
-              <LegalIntake />
             </RequireAuth>
           }
         />

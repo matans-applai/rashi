@@ -10,7 +10,7 @@ export default function Layout({ children }: { children: ReactNode }) {
     <div className="min-h-screen">
       <header className="bg-white border-b border-slate-200">
         <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
-          <Link to="/dashboard" className="flex items-center gap-3">
+          <Link to="/chat" className="flex items-center gap-3">
             <div className="h-9 w-9 rounded-xl bg-brand-600 text-white grid place-items-center font-bold">
               ר
             </div>

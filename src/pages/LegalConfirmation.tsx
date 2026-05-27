@@ -46,9 +46,9 @@ export default function LegalConfirmation() {
           <div className="flex items-center gap-3 justify-center mt-6 flex-wrap">
             <button
               className="btn-secondary"
-              onClick={() => nav("/dashboard")}
+              onClick={() => nav("/chat")}
             >
-              חזרה ללוח הבקרה
+              חזרה לפניות
             </button>
             <button
               className="btn-primary"

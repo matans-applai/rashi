@@ -17,7 +17,7 @@ export default function Login() {
     setLoading(true);
     try {
       await signIn(email, password);
-      nav("/dashboard");
+      nav("/chat");
     } catch (err: any) {
       setError(err?.message ?? "שגיאה בהתחברות");
     } finally {
