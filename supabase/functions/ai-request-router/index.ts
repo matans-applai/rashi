@@ -15,7 +15,7 @@
 import { INTAKE_SCHEMA } from "./schemas.ts";
 import { INTAKE_SYSTEM_PROMPT } from "./prompts.ts";
 
-const DEFAULT_MODEL = "gpt-4o";
+const DEFAULT_MODEL = "gpt-4o-mini";
 const OPENAI_TIMEOUT_MS = 30_000; // 30 seconds server-side timeout
 const MAX_RETRIES = 1; // At most 1 retry for rate-limit / 5xx
 const RETRY_DELAY_MS = 2_000;
