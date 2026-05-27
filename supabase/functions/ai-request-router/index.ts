@@ -15,7 +15,7 @@
 import { INTAKE_SCHEMA } from "./schemas.ts";
 import { INTAKE_SYSTEM_PROMPT } from "./prompts.ts";
 
-const DEFAULT_MODEL = "gpt-4o-mini";
+const DEFAULT_MODEL = "gpt-4o";
 const OPENAI_TIMEOUT_MS = 30_000; // 30 seconds server-side timeout
 const MAX_RETRIES = 1; // At most 1 retry for rate-limit / 5xx
 const RETRY_DELAY_MS = 2_000;
@@ -422,7 +422,7 @@ async function callOpenAIWithRetry(
       parsed.next_questions_he = dedupedQuestions;
 
       // If we dropped EVERY question (all duplicates), force ready_for_final_summary=true
-      // and replace the assistant message with the summary handoff.
+      // and replace the assistant message with the short approval handoff.
       if (
         rawNextQuestions.length > 0 &&
         dedupedQuestions.length === 0 &&
@@ -430,11 +430,16 @@ async function callOpenAIWithRetry(
       ) {
         parsed.ready_for_final_summary = true;
         parsed.assistant_message_he =
-          "אספתי מספיק מידע. הנה סיכום הפנייה — בדקו את הפרטים ואשרו, או כתבו תיקון.";
+          "יש לי מספיק מידע להכין את הפנייה. אפשר להעביר למשפטית, או לערוך פרטים.";
         logRequest({
           request_id: requestId,
           action: "forced_ready_after_dedup",
         });
+      }
+
+      // Default approval_summary_he if model omitted it
+      if (typeof parsed.approval_summary_he !== "string") {
+        parsed.approval_summary_he = "";
       }
 
       // Ensure assistant_message_he includes questions if next_questions_he is non-empty

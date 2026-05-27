@@ -341,5 +341,6 @@ function makeEmptyIntake(description: string): IntakeResponse {
     assistant_message_he:
       "ניתן למלא ולערוך את הפרטים ידנית בעמוד הסיכום.",
     ready_for_final_summary: true,
+    approval_summary_he: "",
   };
 }

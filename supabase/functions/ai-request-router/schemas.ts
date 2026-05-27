@@ -134,6 +134,7 @@ export const INTAKE_SCHEMA = {
       can_continue_with_partial_info: { type: "boolean" },
       assistant_message_he: { type: "string" },
       ready_for_final_summary: { type: "boolean" },
+      approval_summary_he: { type: "string" },
     },
     required: [
       "intake_summary",
@@ -143,6 +144,7 @@ export const INTAKE_SCHEMA = {
       "can_continue_with_partial_info",
       "assistant_message_he",
       "ready_for_final_summary",
+      "approval_summary_he",
     ],
   },
 };

@@ -19,6 +19,7 @@ import {
   softDeleteRequest,
 } from "../lib/requests";
 import { downloadLegalReviewDocx } from "../lib/docxBuilder";
+import { buildShortApprovalSummary } from "../lib/summaryFormatter";
 import type {
   ChatMessage,
   IntakeResponse,
@@ -52,8 +53,8 @@ export default function ChatWorkspace() {
   const [sending, setSending] = useState(false);
   // Editable copy of intake_summary during review phase
   const [editedIntake, setEditedIntake] = useState<IntakeSummary | null>(null);
-  // Whether user chose to correct the summary
-  const [correcting, setCorrecting] = useState(false);
+  // Whether the user has opened the field-level edit panel (pencil icons)
+  const [editMode, setEditMode] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -62,11 +63,10 @@ export default function ChatWorkspace() {
     activeRecord?.status === "ready_for_legal" ||
     activeRecord?.status === "completed";
 
-  // Whether we're in the review/approval phase
+  // Whether we're in the review/approval phase (short summary or edit cards)
   const showReview =
     !isSent &&
     !thinking &&
-    !correcting &&
     intake?.ready_for_final_summary === true &&
     messages.length > 0;
 
@@ -101,7 +101,7 @@ export default function ChatWorkspace() {
       setUploadedFiles([]);
       setError(null);
       setEditedIntake(null);
-      setCorrecting(false);
+      setEditMode(false);
       return;
     }
     let cancelled = false;
@@ -139,14 +139,14 @@ export default function ChatWorkspace() {
     setUploadedFiles([]);
     setError(null);
     setEditedIntake(null);
-    setCorrecting(false);
+    setEditMode(false);
     nav("/chat");
   }
 
   function handleSelectRequest(id: string) {
     setActiveId(id);
     setError(null);
-    setCorrecting(false);
+    setEditMode(false);
     nav(`/chat/${id}`);
     setSidebarOpen(false);
   }
@@ -162,7 +162,7 @@ export default function ChatWorkspace() {
   async function sendTurn(text: string) {
     setError(null);
     setLastUserMessage(text);
-    setCorrecting(false);
+    setEditMode(false);
     const userMsg: ChatMessage = {
       role: "user",
       content: text,
@@ -367,29 +367,21 @@ export default function ChatWorkspace() {
                   ))}
                   {thinking && <AiThinkingState />}
 
-                  {/* In-chat review cards when ready */}
-                  {showReview && editedIntake && (
+                  {/* Approval phase — short summary OR edit cards */}
+                  {showReview && editedIntake && !editMode && (
                     <div className="mt-6 space-y-4">
-                      <div className="bg-brand-50 border border-brand-200 rounded-2xl px-4 py-3">
-                        <h3 className="text-sm font-semibold text-brand-800 mb-1">
-                          סיכום הפנייה
-                        </h3>
-                        <p className="text-xs text-brand-600">
-                          בדקו את הפרטים ולחצו ״אשר״ או תקנו ישירות.
-                        </p>
-                      </div>
-
-                      <IntakeReviewCards
-                        intake={editedIntake}
-                        onChange={(next) => setEditedIntake(next)}
-                        missing={intake?.missing_information?.map(
-                          (m) => m.question_he
-                        )}
-                        files={uploadedFiles}
+                      <ApprovalSummaryCard
+                        summary={
+                          intake?.approval_summary_he?.trim()
+                            ? intake.approval_summary_he
+                            : buildShortApprovalSummary(
+                                editedIntake,
+                                intake?.missing_information ?? [],
+                              )
+                        }
                       />
 
-                      {/* Send-to-legal / Correct buttons */}
-                      <div className="flex flex-wrap gap-3 justify-center pt-2 pb-4">
+                      <div className="flex flex-wrap gap-3 justify-center pt-1 pb-4">
                         <button
                           type="button"
                           className="btn-primary rounded-xl px-6 py-2.5 text-sm font-medium"
@@ -401,9 +393,42 @@ export default function ChatWorkspace() {
                         <button
                           type="button"
                           className="btn-secondary rounded-xl px-6 py-2.5 text-sm font-medium"
-                          onClick={() => setCorrecting(true)}
+                          onClick={() => setEditMode(true)}
                         >
-                          יש לי תיקון
+                          ערוך פרטים
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {showReview && editedIntake && editMode && (
+                    <div className="mt-6 space-y-4">
+                      <div className="bg-brand-50 border border-brand-200 rounded-2xl px-4 py-3">
+                        <h3 className="text-sm font-semibold text-brand-800 mb-1">
+                          עריכת פרטי הפנייה
+                        </h3>
+                        <p className="text-xs text-brand-600">
+                          לחצו על אייקון העיפרון ליד כל שדה כדי לערוך. בסיום
+                          לחצו ״סיום עריכה״ כדי לחזור לסיכום.
+                        </p>
+                      </div>
+
+                      <IntakeReviewCards
+                        intake={editedIntake}
+                        onChange={(next) => setEditedIntake(next)}
+                        missing={intake?.missing_information?.map(
+                          (m) => m.question_he,
+                        )}
+                        files={uploadedFiles}
+                      />
+
+                      <div className="flex justify-center pt-1 pb-4">
+                        <button
+                          type="button"
+                          className="btn-primary rounded-xl px-6 py-2.5 text-sm font-medium"
+                          onClick={() => setEditMode(false)}
+                        >
+                          סיום עריכה
                         </button>
                       </div>
                     </div>
@@ -421,23 +446,17 @@ export default function ChatWorkspace() {
                       manualBusy={false}
                     />
                   )}
-                  {!error && !showReview && (
+                  {!error && (
                     <ChatInput
                       placeholder={
-                        correcting
-                          ? "כתבו מה לתקן בסיכום..."
+                        showReview
+                          ? "תיקון? כתבו כאן (למשל: ״הסכום הוא 155, לא 140״)"
                           : 'ענה/י כאן...'
                       }
                       onSend={sendTurn}
                       busy={thinking}
                       disabled={thinking}
                     />
-                  )}
-                  {showReview && !correcting && (
-                    <p className="text-xs text-slate-400 text-center py-1">
-                      ערכו שדות בסיכום למעלה, או לחצו ״יש לי תיקון״ כדי לכתוב
-                      חופשי.
-                    </p>
                   )}
                 </div>
               </div>
@@ -571,6 +590,24 @@ function SentView({
   );
 }
 
+function ApprovalSummaryCard({ summary }: { summary: string }) {
+  return (
+    <div className="bg-white border border-brand-200 rounded-2xl shadow-sm px-5 py-4">
+      <div className="flex items-center gap-2 mb-3">
+        <div className="h-6 w-6 rounded-lg bg-brand-100 text-brand-700 grid place-items-center text-xs font-bold">
+          ✓
+        </div>
+        <h3 className="text-sm font-semibold text-slate-900">
+          סיכום לאישור
+        </h3>
+      </div>
+      <div className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
+        {summary}
+      </div>
+    </div>
+  );
+}
+
 function makeEmptyIntake(description: string): IntakeResponse {
   return {
     intake_summary: {
@@ -606,5 +643,6 @@ function makeEmptyIntake(description: string): IntakeResponse {
     can_continue_with_partial_info: true,
     assistant_message_he: "",
     ready_for_final_summary: true,
+    approval_summary_he: "",
   };
 }

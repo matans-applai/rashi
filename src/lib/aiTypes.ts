@@ -71,6 +71,8 @@ export interface IntakeResponse {
   can_continue_with_partial_info: boolean;
   assistant_message_he: string;
   ready_for_final_summary: boolean;
+  /** Short bullet-style approval summary (max 6 bullets). Used only in chat. */
+  approval_summary_he: string;
 }
 
 export interface ChatMessage {
