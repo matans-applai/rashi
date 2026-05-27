@@ -56,6 +56,7 @@ export default function ChatInput({
       >
         <textarea
           ref={ref}
+          dir="rtl"
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={(e) => {
@@ -68,7 +69,7 @@ export default function ChatInput({
           disabled={disabled}
           rows={isHero ? 3 : 1}
           className={
-            "w-full resize-none bg-transparent outline-none placeholder:text-slate-400 px-3 py-2 " +
+            "w-full resize-none bg-transparent outline-none placeholder:text-slate-400 text-right px-3 py-2 " +
             (isHero ? "text-base" : "text-sm")
           }
         />

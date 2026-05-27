@@ -6,8 +6,9 @@ export default function ChatBubble({ message }: { message: ChatMessage }) {
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"} w-full`}>
       <div
+        dir="rtl"
         className={
-          "max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-sm " +
+          "max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-sm text-right " +
           (isUser
             ? "bg-brand-600 text-white rounded-bl-md"
             : "bg-white border border-slate-200 text-slate-800 rounded-br-md")
