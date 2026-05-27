@@ -8,7 +8,8 @@ export type RoutingOutcome =
 
 export type RequestStatus =
   | "draft"
-  | "classified"
+  | "classified"        // legacy
+  | "ready_for_legal"
   | "sent_to_legal"
   | "completed";
 

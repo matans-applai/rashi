@@ -4,7 +4,8 @@ import Layout from "../components/Layout";
 import { useAuth, getUserDisplayName } from "../lib/auth";
 import { deleteRequest, listMyRequests } from "../lib/requests";
 import type { RequestRecord } from "../lib/types";
-import { OutcomeBadge, StatusBadge } from "../components/OutcomeBadge";
+import { StatusBadge } from "../components/OutcomeBadge";
+import type { IntakeResponse, IntakeSummary } from "../lib/aiTypes";
 
 export default function Dashboard() {
   const { user } = useAuth();
@@ -26,7 +27,9 @@ export default function Dashboard() {
   const visibleItems = showAll ? items : items.slice(0, 3);
 
   async function handleDelete(req: RequestRecord) {
-    const ok = window.confirm("למחוק את הפנייה הזו? לא ניתן לשחזר אותה לאחר המחיקה.");
+    const ok = window.confirm(
+      "למחוק את הפנייה הזו? לא ניתן לשחזר אותה לאחר המחיקה."
+    );
     if (!ok) return;
     setDeletingId(req.id);
     setError(null);
@@ -48,19 +51,16 @@ export default function Dashboard() {
             שלום, {getUserDisplayName(user)}
           </h1>
           <p className="text-slate-500 mt-1">
-            כאן מנוהלות הפניות שלך לבחינה מקדימה של התקשרויות.
+            סיכומי פניות שהוכנו עבור המחלקה המשפטית.
           </p>
         </div>
-        <button
-          className="btn-primary"
-          onClick={() => nav("/requests/new")}
-        >
+        <button className="btn-primary" onClick={() => nav("/requests/new")}>
           + צור פנייה חדשה
         </button>
       </div>
 
       <div className="card">
-        <h2 className="text-lg font-semibold mb-4">פניות קודמות</h2>
+        <h2 className="text-lg font-semibold mb-4">פניות למחלקה המשפטית</h2>
 
         {loading ? (
           <div className="text-slate-500 text-sm">טוען...</div>
@@ -71,74 +71,116 @@ export default function Dashboard() {
         ) : items.length === 0 ? (
           <EmptyState />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-slate-500 text-right">
-                  <th className="font-medium py-2 pl-4">תאריך</th>
-                  <th className="font-medium py-2 pl-4">תיאור</th>
-                  <th className="font-medium py-2 pl-4">סטטוס</th>
-                  <th className="font-medium py-2 pl-4">המלצה</th>
-                  <th className="font-medium py-2"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {visibleItems.map((r) => (
-                  <tr key={r.id} className="border-t border-slate-100 align-top">
-                    <td className="py-3 pl-4 text-slate-600 whitespace-nowrap">
-                      {new Date(r.created_at).toLocaleDateString("he-IL")}
-                    </td>
-                    <td className="py-3 pl-4 max-w-md">
-                      <div className="font-medium text-slate-800">
-                        {r.department || "—"}
-                      </div>
-                      <div className="text-slate-500 line-clamp-2">
-                        {r.description}
-                      </div>
-                    </td>
-                    <td className="py-3 pl-4 whitespace-nowrap">
-                      <StatusBadge status={r.status} />
-                    </td>
-                    <td className="py-3 pl-4 whitespace-nowrap">
-                      <OutcomeBadge outcome={r.outcome} />
-                    </td>
-                    <td className="py-3">
-                      <div className="flex items-center gap-2">
-                        <Link
-                          to={`/requests/${r.id}`}
-                          className="btn-ghost"
-                        >
-                          פתח
-                        </Link>
-                        <button
-                          type="button"
-                          className="btn-ghost text-red-700 hover:bg-red-50 focus:ring-red-200"
-                          onClick={() => handleDelete(r)}
-                          disabled={deletingId === r.id}
-                        >
-                          {deletingId === r.id ? "מוחק..." : "מחק"}
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {visibleItems.map((r) => (
+                <RequestCard
+                  key={r.id}
+                  req={r}
+                  onDelete={() => handleDelete(r)}
+                  deleting={deletingId === r.id}
+                />
+              ))}
+            </div>
             {items.length > 3 && (
-              <div className="border-t border-slate-100 pt-4 mt-2 flex justify-center">
+              <div className="border-t border-slate-100 pt-4 mt-5 flex justify-center">
                 <button
                   type="button"
                   className="btn-secondary"
                   onClick={() => setShowAll((v) => !v)}
                 >
-                  {showAll ? "הצג רק 3 אחרונות" : `הצג עוד ${items.length - 3} פניות`}
+                  {showAll
+                    ? "הצג רק 3 אחרונות"
+                    : `הצג עוד ${items.length - 3} פניות`}
                 </button>
               </div>
             )}
-          </div>
+          </>
         )}
       </div>
     </Layout>
+  );
+}
+
+function RequestCard({
+  req,
+  onDelete,
+  deleting,
+}: {
+  req: RequestRecord;
+  onDelete: () => void;
+  deleting: boolean;
+}) {
+  const intake =
+    (req.legal_case as IntakeSummary | null) ??
+    ((req.llm_output as IntakeResponse | null)?.intake_summary ?? null);
+
+  const title =
+    intake?.request_purpose?.slice(0, 80) ||
+    intake?.department_or_project ||
+    req.department ||
+    req.description.slice(0, 80) ||
+    "פנייה ללא כותרת";
+
+  const secondParty =
+    intake?.second_party_name || req.supplier_name || "—";
+
+  const llm = req.llm_output as IntakeResponse | null;
+  const missingCount = llm?.missing_information.length ?? 0;
+  const isReady =
+    req.status === "ready_for_legal" || req.status === "sent_to_legal";
+
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-4 hover:shadow-sm transition flex flex-col gap-3">
+      <div className="flex items-start justify-between gap-3">
+        <Link
+          to={`/requests/${req.id}`}
+          className="text-slate-800 font-medium leading-snug hover:underline line-clamp-2"
+        >
+          {title}
+        </Link>
+        <StatusBadge status={req.status} />
+      </div>
+
+      <div className="grid grid-cols-2 gap-2 text-xs text-slate-500">
+        <Row label="צד שני" value={secondParty} />
+        <Row
+          label="עודכן"
+          value={new Date(req.created_at).toLocaleDateString("he-IL")}
+        />
+        <Row
+          label="חסר מידע"
+          value={missingCount === 0 ? "—" : `${missingCount} פריטים`}
+        />
+        <Row
+          label="מוכן למשפטית"
+          value={isReady ? "כן" : "לא"}
+        />
+      </div>
+
+      <div className="flex items-center justify-between gap-2 mt-1">
+        <Link to={`/requests/${req.id}`} className="btn-ghost text-xs">
+          פתח סיכום
+        </Link>
+        <button
+          type="button"
+          className="btn-ghost text-xs text-red-700 hover:bg-red-50"
+          onClick={onDelete}
+          disabled={deleting}
+        >
+          {deleting ? "מוחק..." : "מחק"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function Row({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div className="text-slate-400">{label}</div>
+      <div className="text-slate-700 truncate">{value}</div>
+    </div>
   );
 }
 
@@ -147,7 +189,8 @@ function EmptyState() {
     <div className="text-center py-12">
       <div className="text-slate-700 font-medium">אין עדיין פניות</div>
       <div className="text-slate-500 text-sm mt-1">
-        ניתן לפתוח פנייה חדשה כדי לקבל סיווג ראשוני להמשך טיפול.
+        פתחו פנייה חדשה ותארו אותה בחופשי — נדאג לאסוף ולסכם את המידע למחלקה
+        המשפטית.
       </div>
     </div>
   );

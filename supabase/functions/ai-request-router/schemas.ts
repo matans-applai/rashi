@@ -1,105 +1,102 @@
-// JSON Schemas for OpenAI Structured Outputs.
+// JSON Schema for OpenAI Structured Outputs.
 //
 // IMPORTANT — OpenAI strict mode rules:
 //   - every property must appear in `required`
 //   - no `additionalProperties: true` (we set false explicitly)
 //   - optional values use a union with "null" instead of `optional`
 
-export const ROUTING_SCHEMA = {
-  name: "rashi_routing",
+export const INTAKE_SCHEMA = {
+  name: "rashi_legal_intake",
   strict: true,
   schema: {
     type: "object",
     additionalProperties: false,
     properties: {
-      request_summary: {
+      intake_summary: {
         type: "object",
         additionalProperties: false,
         properties: {
-          purpose: { type: "string" },
           department_or_project: { type: ["string", "null"] },
-          second_party: { type: ["string", "null"] },
-          supplier_status: {
+          request_purpose: { type: ["string", "null"] },
+          background: { type: ["string", "null"] },
+          second_party_name: { type: ["string", "null"] },
+          second_party_type: {
             type: "string",
-            enum: ["registered", "not_registered", "unknown", "not_checked"],
+            enum: [
+              "company",
+              "nonprofit",
+              "public_body",
+              "individual",
+              "unknown",
+            ],
           },
-          amount: { type: ["number", "null"] },
-          timeline: { type: ["string", "null"] },
           party_roles: { type: ["string", "null"] },
-          documents_mentioned: {
-            type: "array",
-            items: { type: "string" },
-          },
-        },
-        required: [
-          "purpose",
-          "department_or_project",
-          "second_party",
-          "supplier_status",
-          "amount",
-          "timeline",
-          "party_roles",
-          "documents_mentioned",
-        ],
-      },
-      route: {
-        type: "string",
-        enum: [
-          "general_terms",
-          "supplier_registration",
-          "insurance_required",
-          "legal_review",
-          "grant",
-          "missing_info",
-        ],
-      },
-      route_label_he: { type: "string" },
-      confidence: { type: "string", enum: ["low", "medium", "high"] },
-      reasoning_summary_he: { type: "string" },
-      detected_triggers: {
-        type: "array",
-        items: {
-          type: "object",
-          additionalProperties: false,
-          properties: {
-            type: {
-              type: "string",
-              enum: [
-                "legal",
-                "insurance",
-                "grant",
-                "supplier",
-                "missing",
-                "general",
-              ],
-            },
-            label_he: { type: "string" },
-            explanation_he: { type: "string" },
-          },
-          required: ["type", "label_he", "explanation_he"],
-        },
-      },
-      quote_assessment: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          quote_exists: { type: "string", enum: ["yes", "no", "unknown"] },
-          quote_cleanliness: {
+          amount: { type: ["number", "null"] },
+          currency: { type: "string", enum: ["ILS", "unknown"] },
+          timeline: { type: ["string", "null"] },
+          is_new_or_existing: {
             type: "string",
-            enum: ["clean", "contains_supplier_terms", "unknown"],
+            enum: ["new", "existing", "extension", "unknown"],
           },
-          supplier_terms_detected: {
-            type: "array",
-            items: { type: "string" },
+          quote_exists: { type: "string", enum: ["yes", "no", "unknown"] },
+          quote_details: { type: ["string", "null"] },
+          supplier_selected: {
+            type: "string",
+            enum: ["yes", "no", "unknown"],
           },
+          selection_process: { type: ["string", "null"] },
+          partners_involved: { type: ["string", "null"] },
+          documents_mentioned: { type: "array", items: { type: "string" } },
+          privacy_or_personal_data: {
+            type: "string",
+            enum: ["yes", "no", "unknown"],
+          },
+          ip_or_copyrights: { type: "string", enum: ["yes", "no", "unknown"] },
+          participant_photography: {
+            type: "string",
+            enum: ["yes", "no", "unknown"],
+          },
+          insurance_or_operational_risk: {
+            type: "string",
+            enum: ["yes", "no", "unknown"],
+          },
+          subcontractors: { type: "string", enum: ["yes", "no", "unknown"] },
+          supplier_terms_or_contract: {
+            type: "string",
+            enum: ["yes", "no", "unknown"],
+          },
+          grant_related: { type: "string", enum: ["yes", "no", "unknown"] },
+          special_notes: { type: "array", items: { type: "string" } },
         },
         required: [
+          "department_or_project",
+          "request_purpose",
+          "background",
+          "second_party_name",
+          "second_party_type",
+          "party_roles",
+          "amount",
+          "currency",
+          "timeline",
+          "is_new_or_existing",
           "quote_exists",
-          "quote_cleanliness",
-          "supplier_terms_detected",
+          "quote_details",
+          "supplier_selected",
+          "selection_process",
+          "partners_involved",
+          "documents_mentioned",
+          "privacy_or_personal_data",
+          "ip_or_copyrights",
+          "participant_photography",
+          "insurance_or_operational_risk",
+          "subcontractors",
+          "supplier_terms_or_contract",
+          "grant_related",
+          "special_notes",
         ],
       },
-      missing_for_routing: {
+      known_information_he: { type: "array", items: { type: "string" } },
+      missing_information: {
         type: "array",
         items: {
           type: "object",
@@ -107,142 +104,40 @@ export const ROUTING_SCHEMA = {
           properties: {
             field: { type: "string" },
             question_he: { type: "string" },
-            importance: { type: "string", enum: ["low", "medium", "high"] },
+            importance: {
+              type: "string",
+              enum: ["high", "medium", "low"],
+            },
+            topic: {
+              type: "string",
+              enum: [
+                "basic_details",
+                "commercial",
+                "supplier_selection",
+                "documents",
+                "risks",
+                "grant",
+                "privacy",
+                "other",
+              ],
+            },
           },
-          required: ["field", "question_he", "importance"],
+          required: ["field", "question_he", "importance", "topic"],
         },
       },
-      next_questions_he: {
-        type: "array",
-        items: { type: "string" },
-      },
+      next_questions_he: { type: "array", items: { type: "string" } },
       can_continue_with_partial_info: { type: "boolean" },
-      user_facing_message_he: { type: "string" },
+      assistant_message_he: { type: "string" },
+      ready_for_final_summary: { type: "boolean" },
     },
     required: [
-      "request_summary",
-      "route",
-      "route_label_he",
-      "confidence",
-      "reasoning_summary_he",
-      "detected_triggers",
-      "quote_assessment",
-      "missing_for_routing",
+      "intake_summary",
+      "known_information_he",
+      "missing_information",
       "next_questions_he",
       "can_continue_with_partial_info",
-      "user_facing_message_he",
-    ],
-  },
-};
-
-export const LEGAL_INTAKE_SCHEMA = {
-  name: "rashi_legal_intake",
-  strict: true,
-  schema: {
-    type: "object",
-    additionalProperties: false,
-    properties: {
-      legal_case: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          department_or_project: { type: ["string", "null"] },
-          purpose: { type: "string" },
-          second_party: { type: ["string", "null"] },
-          supplier_status: { type: ["string", "null"] },
-          agreement_type_estimate: {
-            type: "string",
-            enum: [
-              "service_purchase",
-              "cooperation",
-              "government_joint_venture",
-              "grant",
-              "sponsorship",
-              "other",
-              "unclear",
-            ],
-          },
-          party_roles: { type: ["string", "null"] },
-          amount: { type: ["number", "null"] },
-          timeline: { type: ["string", "null"] },
-          quote_exists: { type: "string", enum: ["yes", "no", "unknown"] },
-          supplier_selected: {
-            type: "string",
-            enum: ["yes", "no", "unknown"],
-          },
-          competitive_process: {
-            type: "string",
-            enum: ["yes", "no", "unknown"],
-          },
-          single_supplier: {
-            type: "string",
-            enum: ["yes", "no", "unknown"],
-          },
-          partners: { type: "string", enum: ["yes", "no", "unknown"] },
-          privacy_or_personal_data: {
-            type: "string",
-            enum: ["yes", "no", "unknown"],
-          },
-          copyrights_or_ip: {
-            type: "string",
-            enum: ["yes", "no", "unknown"],
-          },
-          participant_photography: {
-            type: "string",
-            enum: ["yes", "no", "unknown"],
-          },
-          insurance_required: {
-            type: "string",
-            enum: ["yes", "no", "unknown"],
-          },
-          subcontractors: {
-            type: "string",
-            enum: ["yes", "no", "unknown"],
-          },
-          supplier_terms: { type: "array", items: { type: "string" } },
-          documents: { type: "array", items: { type: "string" } },
-          risks_and_exceptions: { type: "array", items: { type: "string" } },
-          missing_info: { type: "array", items: { type: "string" } },
-          reason_for_legal_review: { type: "string" },
-        },
-        required: [
-          "department_or_project",
-          "purpose",
-          "second_party",
-          "supplier_status",
-          "agreement_type_estimate",
-          "party_roles",
-          "amount",
-          "timeline",
-          "quote_exists",
-          "supplier_selected",
-          "competitive_process",
-          "single_supplier",
-          "partners",
-          "privacy_or_personal_data",
-          "copyrights_or_ip",
-          "participant_photography",
-          "insurance_required",
-          "subcontractors",
-          "supplier_terms",
-          "documents",
-          "risks_and_exceptions",
-          "missing_info",
-          "reason_for_legal_review",
-        ],
-      },
-      questions_to_complete_he: {
-        type: "array",
-        items: { type: "string" },
-      },
-      ready_for_summary: { type: "boolean" },
-      assistant_message_he: { type: "string" },
-    },
-    required: [
-      "legal_case",
-      "questions_to_complete_he",
-      "ready_for_summary",
       "assistant_message_he",
+      "ready_for_final_summary",
     ],
   },
 };

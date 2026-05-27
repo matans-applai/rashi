@@ -1,30 +1,36 @@
-import type { ChatStep } from "../../lib/aiTypes";
+import type { IntakeStep } from "../../lib/aiTypes";
 
-const STEPS: { id: ChatStep; label: string }[] = [
+const STEPS: { id: IntakeStep; label: string }[] = [
   { id: "describe", label: "תיאור הפנייה" },
-  { id: "clarify", label: "שאלות השלמה" },
-  { id: "review_route", label: "המלצה" },
-  { id: "final_summary", label: "סיכום / מסמך" },
+  { id: "chat", label: "השלמת מידע" },
+  { id: "review", label: "סיכום ועריכה" },
+  { id: "ready", label: "מוכן למשפטית" },
 ];
 
-/** Light step indicator at the top of the chat page. */
+/**
+ * Minimal step indicator at the top of intake pages. Backward-compatible —
+ * accepts the legacy step name "final_summary" as an alias for "review".
+ */
 export default function StepIndicator({
   current,
-  legalActive,
+  legalActive: _legalActive,
 }: {
-  current: ChatStep;
+  current: IntakeStep | "final_summary" | "review_route" | "clarify" | "legal_chat";
   legalActive?: boolean;
 }) {
-  const idx = STEPS.findIndex((s) => s.id === current);
-  const labelOverride: Partial<Record<ChatStep, string>> = legalActive
-    ? { final_summary: "סיכום משפטי" }
-    : {};
+  // Map legacy values
+  const normalised: IntakeStep =
+    current === "final_summary"
+      ? "ready"
+      : current === "review_route" || current === "clarify" || current === "legal_chat"
+      ? "chat"
+      : (current as IntakeStep);
+
+  const idx = STEPS.findIndex((s) => s.id === normalised);
   return (
     <ol className="flex items-center gap-2 sm:gap-4 mb-6 justify-center flex-wrap">
       {STEPS.map((s, i) => {
-        const state =
-          i < idx ? "done" : i === idx ? "active" : "upcoming";
-        const label = labelOverride[s.id] ?? s.label;
+        const state = i < idx ? "done" : i === idx ? "active" : "upcoming";
         return (
           <li key={s.id} className="flex items-center gap-2">
             <span
@@ -42,10 +48,12 @@ export default function StepIndicator({
             <span
               className={
                 "text-xs sm:text-sm " +
-                (state === "upcoming" ? "text-slate-400" : "text-slate-700 font-medium")
+                (state === "upcoming"
+                  ? "text-slate-400"
+                  : "text-slate-700 font-medium")
               }
             >
-              {label}
+              {s.label}
             </span>
             {i < STEPS.length - 1 && (
               <span className="hidden sm:block w-8 h-px bg-slate-200" />

@@ -26,6 +26,7 @@ export function OutcomeBadge({ outcome }: { outcome: RoutingOutcome | null }) {
 const STATUS_LABEL: Record<RequestStatus, string> = {
   draft: "טיוטה",
   classified: "סווג",
+  ready_for_legal: "מוכן להעברה למשפטית",
   sent_to_legal: "נשלח לבדיקה משפטית",
   completed: "הושלם",
 };
@@ -33,6 +34,7 @@ const STATUS_LABEL: Record<RequestStatus, string> = {
 const STATUS_CLASS: Record<RequestStatus, string> = {
   draft: "tag",
   classified: "tag-blue",
+  ready_for_legal: "tag-amber",
   sent_to_legal: "tag-red",
   completed: "tag-green",
 };

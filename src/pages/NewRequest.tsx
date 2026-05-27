@@ -5,42 +5,46 @@ import StepIndicator from "../components/chat/StepIndicator";
 import ChatBubble from "../components/chat/ChatBubble";
 import ChatInput from "../components/chat/ChatInput";
 import AiThinkingState from "../components/chat/AiThinkingState";
-import ExtractedFactsCard from "../components/chat/ExtractedFactsCard";
-import RouteRecommendationCard from "../components/chat/RouteRecommendationCard";
+import KnownInfoCard from "../components/chat/KnownInfoCard";
 import MissingInfoQuestions from "../components/chat/MissingInfoQuestions";
+import AIErrorPanel from "../components/chat/AIErrorPanel";
 import { useAuth } from "../lib/auth";
-import { callRouting, guessSupplierName } from "../lib/aiClient";
-import { createChatRequest } from "../lib/requests";
+import { callIntake, AIError } from "../lib/aiClient";
+import { createIntakeRequest, updateIntake } from "../lib/requests";
 import type {
   ChatMessage,
-  ChatStep,
-  RoutingResponse,
+  IntakeResponse,
+  IntakeStep,
 } from "../lib/aiTypes";
+import type { RequestRecord } from "../lib/types";
 
 const HERO_CHIPS = [
-  { label: "רכישת שירות", value: "אנחנו רוצים לרכוש שירות מ-" },
-  { label: "מענק", value: "אנחנו רוצים להעביר מענק ל-" },
-  { label: "ייעוץ", value: "אנחנו רוצים להתקשר עם יועץ ל-" },
-  { label: "פעילות עם משתתפים", value: "מתכננים פעילות עם משתתפים: " },
-  { label: "לא בטוח", value: "אני לא בטוח/ה איך לסווג את הפנייה הבאה: " },
+  { label: "יש לי ספק / יועץ", value: "אנחנו רוצים להתקשר עם " },
+  { label: "מדובר במענק", value: "אנחנו רוצים להעביר מענק ל-" },
+  { label: "יש הצעת מחיר", value: "יש בידינו הצעת מחיר. " },
+  { label: "יש שותפים נוספים", value: "יש לנו שותפים נוספים לפעילות: " },
+  { label: "לא בטוח מה צריך", value: "אני לא בטוח/ה איזה סוג הסכם צריך — " },
 ];
 
 /**
- * Chat-first intake. The first screen is a single large input. After the user
- * sends the description, we call the AI router, show what was understood, and
- * let the user approve the proposed route (or answer follow-up questions).
+ * Chat-first legal-intake assistant.
+ *
+ * The user describes the request freely. The AI extracts structured intake
+ * info and asks short follow-ups. When the user is done (or the AI says
+ * ready_for_final_summary), we persist and navigate to the editable review.
  */
 export default function NewRequest() {
   const { user } = useAuth();
   const nav = useNavigate();
 
-  const [step, setStep] = useState<ChatStep>("describe");
+  const [step, setStep] = useState<IntakeStep>("describe");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [routing, setRouting] = useState<RoutingResponse | null>(null);
+  const [intake, setIntake] = useState<IntakeResponse | null>(null);
   const [thinking, setThinking] = useState(false);
-  const [draftAnswer, setDraftAnswer] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [persisting, setPersisting] = useState(false);
+  const [recordId, setRecordId] = useState<string | null>(null);
+  const [lastUserMessage, setLastUserMessage] = useState<string | null>(null);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -48,11 +52,11 @@ export default function NewRequest() {
       top: scrollRef.current.scrollHeight,
       behavior: "smooth",
     });
-  }, [messages, routing, thinking]);
+  }, [messages, intake, thinking]);
 
-  // ---- Initial description send -------------------------------------------
-  async function handleInitialSend(text: string) {
+  async function sendTurn(text: string) {
     setError(null);
+    setLastUserMessage(text);
     const userMsg: ChatMessage = {
       role: "user",
       content: text,
@@ -60,112 +64,98 @@ export default function NewRequest() {
     };
     const newMessages = [...messages, userMsg];
     setMessages(newMessages);
-    setStep("clarify");
+    setStep("chat");
     setThinking(true);
     try {
-      const supplierGuess = guessSupplierName(text);
-      const result = await callRouting({
-        messages: newMessages,
-        inferredSupplierName: supplierGuess,
-      });
-      setRouting(result);
+      const result = await callIntake({ messages: newMessages });
       const assistantMsg: ChatMessage = {
         role: "assistant",
-        content: result.user_facing_message_he,
+        content: result.assistant_message_he,
         ts: new Date().toISOString(),
       };
-      setMessages((m) => [...m, assistantMsg]);
-      // If there are no clarifying questions or the model says it can continue,
-      // go straight to the route review.
-      if (
-        result.next_questions_he.length === 0 ||
-        result.can_continue_with_partial_info
-      ) {
-        setStep("review_route");
-      } else {
-        setStep("clarify");
+      const withAssistant = [...newMessages, assistantMsg];
+      setMessages(withAssistant);
+      setIntake(result);
+
+      // Persist progressively so the user can leave and come back.
+      let record: RequestRecord | null = null;
+      if (!recordId && user) {
+        const description = newMessages.find((m) => m.role === "user")?.content ?? text;
+        record = await createIntakeRequest({
+          userId: user.id,
+          userEmail: user.email ?? null,
+          description,
+          chatMessages: withAssistant,
+          intake: result,
+        });
+        setRecordId(record.id);
+      } else if (recordId) {
+        await updateIntake({
+          id: recordId,
+          chatMessages: withAssistant,
+          intake: result,
+        });
       }
-    } catch (e: any) {
-      setError(e?.message ?? "שגיאה בקריאה ל-AI");
-      setStep("describe");
+    } catch (e) {
+      const msg = e instanceof AIError ? e.message : String(e);
+      setError(msg);
     } finally {
       setThinking(false);
     }
   }
 
-  // ---- Follow-up turn (clarify step) --------------------------------------
-  async function handleClarifySend(text: string) {
-    if (!routing) return;
-    setError(null);
-    const userMsg: ChatMessage = {
-      role: "user",
-      content: text,
-      ts: new Date().toISOString(),
-    };
-    const newMessages = [...messages, userMsg];
-    setMessages(newMessages);
-    setThinking(true);
-    try {
-      const result = await callRouting({
-        messages: newMessages,
-        inferredSupplierName:
-          guessSupplierName(text) ?? routing.request_summary.second_party,
-      });
-      setRouting(result);
-      const assistantMsg: ChatMessage = {
-        role: "assistant",
-        content: result.user_facing_message_he,
-        ts: new Date().toISOString(),
-      };
-      setMessages((m) => [...m, assistantMsg]);
-      if (
-        result.next_questions_he.length === 0 ||
-        result.can_continue_with_partial_info ||
-        isContinueSignal(text)
-      ) {
-        setStep("review_route");
-      }
-    } catch (e: any) {
-      setError(e?.message ?? "שגיאה בקריאה ל-AI");
-    } finally {
-      setThinking(false);
-    }
-  }
-
-  // ---- Approve route → persist & navigate ---------------------------------
-  async function approveRoute() {
-    if (!routing || !user) return;
+  async function goToReview() {
+    if (!recordId) return;
     setPersisting(true);
-    setError(null);
     try {
-      const originalDescription = messages.find((m) => m.role === "user")?.content ?? "";
-      const record = await createChatRequest({
-        userId: user.id,
-        userEmail: user.email ?? null,
-        description: originalDescription,
-        chatMessages: messages,
-        routing,
-      });
-      if (routing.route === "legal_review") {
-        nav(`/requests/${record.id}/legal`);
-      } else {
-        nav(`/requests/${record.id}`);
-      }
-    } catch (e: any) {
-      setError(e?.message ?? "שגיאה בשמירה");
+      nav(`/requests/${recordId}`);
     } finally {
       setPersisting(false);
     }
   }
 
-  // ---- Render --------------------------------------------------------------
+  function retryLastTurn() {
+    if (lastUserMessage) {
+      // Remove the last user message from history and resend.
+      setMessages((m) => m.slice(0, -1));
+      sendTurn(lastUserMessage);
+    }
+  }
+
+  async function continueManually() {
+    // If the AI is broken, save what we have and let the user edit manually.
+    if (!user) return;
+    setPersisting(true);
+    try {
+      // Create a stub record with no intake_summary if none exists yet.
+      if (!recordId) {
+        const description = messages.find((m) => m.role === "user")?.content ?? "";
+        const fakeIntake = makeEmptyIntake(description);
+        const record = await createIntakeRequest({
+          userId: user.id,
+          userEmail: user.email ?? null,
+          description,
+          chatMessages: messages,
+          intake: fakeIntake,
+        });
+        setRecordId(record.id);
+        nav(`/requests/${record.id}`);
+      } else {
+        nav(`/requests/${recordId}`);
+      }
+    } finally {
+      setPersisting(false);
+    }
+  }
+
+  // -------- Render --------
   return (
     <Layout>
       <div className="max-w-3xl mx-auto">
-        <StepIndicator current={step} />
+        <StepIndicator current={step === "describe" ? "describe" : "chat"} />
 
         {step === "describe" && messages.length === 0 ? (
-          <HeroDescribe onSend={handleInitialSend} disabled={thinking} />
+          <HeroDescribe onSend={sendTurn} disabled={thinking} />
         ) : (
           <div className="space-y-4">
             <div
@@ -178,47 +168,47 @@ export default function NewRequest() {
               {thinking && <AiThinkingState />}
             </div>
 
-            {routing && step !== "describe" && (
-              <ExtractedFactsCard routing={routing} />
-            )}
-
-            {routing && step === "clarify" && !thinking && (
-              <>
-                <MissingInfoQuestions
-                  questions={routing.next_questions_he}
-                  onPick={(q) => setDraftAnswer(q + " — ")}
-                />
-                <ChatInput
-                  placeholder="ענה/י כאן או כתבו 'תמשיך' כדי לקבל המלצה עם המידע הקיים"
-                  onSend={handleClarifySend}
-                  busy={thinking}
-                  disabled={thinking}
-                  initialText={draftAnswer}
-                />
-              </>
-            )}
-
-            {routing && step === "review_route" && (
-              <RouteRecommendationCard
-                routing={routing}
-                onApprove={approveRoute}
-                onAmend={() => {
-                  setStep("clarify");
-                }}
-                approveLabel={
-                  persisting
-                    ? "שומר..."
-                    : routing.route === "legal_review"
-                    ? "מאשר/ת והמשך לבדיקה משפטית"
-                    : "מאשר/ת וממשיכים"
-                }
+            {error && (
+              <AIErrorPanel
+                onRetry={retryLastTurn}
+                onContinueManual={continueManually}
+                manualBusy={persisting}
               />
             )}
 
-            {error && (
-              <div className="rounded-lg bg-red-50 border border-red-200 text-red-700 px-3 py-2 text-sm">
-                {error}
-              </div>
+            {!error && intake && (
+              <>
+                <KnownInfoCard intake={intake} />
+                {!intake.ready_for_final_summary &&
+                  intake.next_questions_he.length > 0 && (
+                    <MissingInfoQuestions
+                      questions={intake.next_questions_he}
+                    />
+                  )}
+                <ChatInput
+                  placeholder='ענה/י כאן, או כתבו "תמשיך" כדי לעבור לסיכום'
+                  onSend={sendTurn}
+                  busy={thinking}
+                  disabled={thinking}
+                />
+                <div className="flex items-center gap-3 justify-end pt-2 flex-wrap">
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => nav("/dashboard")}
+                  >
+                    שמור וצא
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    onClick={goToReview}
+                    disabled={persisting || !recordId}
+                  >
+                    {persisting ? "טוען..." : "המשך לסיכום"}
+                  </button>
+                </div>
+              </>
             )}
           </div>
         )}
@@ -239,14 +229,14 @@ function HeroDescribe({
       <h1 className="text-3xl sm:text-4xl font-bold text-slate-900 mb-3">
         ספרו לי על הפנייה
       </h1>
-      <p className="text-slate-500 mb-10 max-w-xl mx-auto leading-relaxed">
-        אפשר לכתוב חופשי. נסו לכלול אם ידוע: מטרת ההתקשרות, הצד השני, סכום משוער,
-        הצעת מחיר, ומה כל צד אמור לתת או לקבל.
+      <p className="text-slate-500 mb-10 max-w-2xl mx-auto leading-relaxed">
+        כתבו חופשי מה אתם צריכים. אפשר לכלול אם ידוע: מי הצד השני, מה מטרת
+        ההתקשרות, סכום, לו״ז, מסמכים קיימים ומה כל צד אמור לתת או לקבל.
       </p>
       <div className="max-w-2xl mx-auto">
         <ChatInput
           size="hero"
-          placeholder="לדוגמה: יום גיבוש לעובדים בצפון, ODT, 35,000 ₪, יש הצעת מחיר נקייה..."
+          placeholder="לדוגמה: רוצים להתקשר עם יועצי אסטרטגיה ABC לליווי הנהלה למחצית שנה, 90 אלף ₪, יש הצעת מחיר..."
           onSend={onSend}
           chips={HERO_CHIPS}
           disabled={disabled}
@@ -256,7 +246,42 @@ function HeroDescribe({
   );
 }
 
-function isContinueSignal(text: string): boolean {
-  const t = text.trim().toLowerCase();
-  return /(לא יודע|אין לי עוד מידע|תמשיך|אפשר להמשיך|להמשיך)/.test(t);
+/** Build an empty intake response — used when the AI fails and the user
+ *  wants to proceed manually. The review screen lets them edit everything. */
+function makeEmptyIntake(description: string): IntakeResponse {
+  return {
+    intake_summary: {
+      department_or_project: null,
+      request_purpose: description.slice(0, 200) || null,
+      background: null,
+      second_party_name: null,
+      second_party_type: "unknown",
+      party_roles: null,
+      amount: null,
+      currency: "unknown",
+      timeline: null,
+      is_new_or_existing: "unknown",
+      quote_exists: "unknown",
+      quote_details: null,
+      supplier_selected: "unknown",
+      selection_process: null,
+      partners_involved: null,
+      documents_mentioned: [],
+      privacy_or_personal_data: "unknown",
+      ip_or_copyrights: "unknown",
+      participant_photography: "unknown",
+      insurance_or_operational_risk: "unknown",
+      subcontractors: "unknown",
+      supplier_terms_or_contract: "unknown",
+      grant_related: "unknown",
+      special_notes: [],
+    },
+    known_information_he: [],
+    missing_information: [],
+    next_questions_he: [],
+    can_continue_with_partial_info: true,
+    assistant_message_he:
+      "ניתן למלא ולערוך את הפרטים ידנית בעמוד הסיכום.",
+    ready_for_final_summary: true,
+  };
 }

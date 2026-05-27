@@ -2,36 +2,51 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import Layout from "../components/Layout";
 import StepIndicator from "../components/chat/StepIndicator";
-import RouteRecommendationCard from "../components/chat/RouteRecommendationCard";
-import ExtractedFactsCard from "../components/chat/ExtractedFactsCard";
-import { OutcomeBadge, StatusBadge } from "../components/OutcomeBadge";
-import { getRequest, markSentToLegal } from "../lib/requests";
+import IntakeReviewCards from "../components/chat/IntakeReviewCards";
+import { StatusBadge } from "../components/OutcomeBadge";
 import {
-  GRANT_MASTER_DOC_URL,
-  RASHI_GENERAL_TERMS_DOC_URL,
-  SAP_SUPPLIER_REGISTRATION_URL,
-  buildSupplierRegistrationMessage,
-} from "../lib/links";
+  getRequest,
+  markReadyForLegal,
+  markSentToLegal,
+  saveEditedIntake,
+} from "../lib/requests";
+import { downloadLegalReviewDocx } from "../lib/docxBuilder";
+import { useAuth, getUserDisplayName } from "../lib/auth";
 import type { RequestRecord } from "../lib/types";
-import type { RoutingResponse } from "../lib/aiTypes";
+import type { IntakeResponse, IntakeSummary } from "../lib/aiTypes";
 
 /**
- * Read-only summary page for a saved request. For chat-first requests this
- * shows: route badge, AI-extracted facts, route reasoning, and route-specific
- * next actions. For legal_review requests, the user normally lands here only
- * after the legal intake is finished.
+ * Editable review screen. The user can edit any field, download a Word doc,
+ * mark as ready for legal, or send to legal (POC stub).
+ *
+ * Replaces the old "route recommendation" page entirely.
  */
 export default function RequestSummary() {
   const { id } = useParams();
   const nav = useNavigate();
+  const { user } = useAuth();
+
   const [req, setReq] = useState<RequestRecord | null>(null);
+  const [intake, setIntake] = useState<IntakeSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [savingField, setSavingField] = useState(false);
+  const [action, setAction] = useState<"ready" | "send" | "download" | null>(null);
 
   useEffect(() => {
     if (!id) return;
     getRequest(id)
-      .then(setReq)
+      .then((r) => {
+        if (!r) {
+          setError("פנייה לא נמצאה");
+          return;
+        }
+        setReq(r);
+        const stored =
+          (r.legal_case as IntakeSummary | null) ??
+          ((r.llm_output as IntakeResponse | null)?.intake_summary ?? null);
+        setIntake(stored);
+      })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }, [id]);
@@ -53,254 +68,146 @@ export default function RequestSummary() {
     );
   }
 
-  const routing = (req.llm_output as RoutingResponse | null) ?? null;
-
-  async function sendDirectlyToLegal() {
+  async function handleIntakeChange(next: IntakeSummary) {
     if (!req) return;
-    await markSentToLegal(req.id);
-    nav(`/requests/${req.id}/confirm`);
+    setIntake(next);
+    setSavingField(true);
+    try {
+      const updated = await saveEditedIntake(req.id, next);
+      setReq(updated);
+    } catch (e: any) {
+      setError(e?.message ?? "שגיאה בשמירה");
+    } finally {
+      setSavingField(false);
+    }
   }
+
+  async function handleReady() {
+    if (!req) return;
+    setAction("ready");
+    try {
+      const updated = await markReadyForLegal(req.id);
+      setReq(updated);
+    } catch (e: any) {
+      setError(e?.message ?? "שגיאה");
+    } finally {
+      setAction(null);
+    }
+  }
+
+  async function handleSend() {
+    if (!req) return;
+    setAction("send");
+    try {
+      const updated = await markSentToLegal(req.id);
+      setReq(updated);
+      nav(`/requests/${req.id}/confirm`);
+    } catch (e: any) {
+      setError(e?.message ?? "שגיאה");
+    } finally {
+      setAction(null);
+    }
+  }
+
+  async function handleDownload() {
+    if (!req || !intake) return;
+    setAction("download");
+    try {
+      await downloadLegalReviewDocx({
+        req,
+        intake,
+        requesterName: getUserDisplayName(user),
+        requesterEmail: user?.email ?? "",
+      });
+    } catch (e: any) {
+      setError(e?.message ?? "שגיאה ביצירת מסמך");
+    } finally {
+      setAction(null);
+    }
+  }
+
+  const llm = req.llm_output as IntakeResponse | null;
+  const missing = llm?.missing_information.map((m) => m.question_he) ?? [];
 
   return (
     <Layout>
-      <div className="max-w-3xl mx-auto">
-        <StepIndicator current="final_summary" />
+      <div className="max-w-4xl mx-auto">
+        <StepIndicator
+          current={req.status === "ready_for_legal" || req.status === "sent_to_legal" ? "ready" : "review"}
+        />
 
-        <div className="mb-4 flex items-center justify-between gap-3 flex-wrap">
+        <div className="mb-6 flex items-center justify-between gap-3 flex-wrap">
           <div>
-            <div className="text-sm text-slate-500">פנייה</div>
-            <h1 className="text-2xl font-semibold flex items-center gap-3 flex-wrap">
-              {req.department || "—"}
+            <div className="text-sm text-slate-500">סיכום פנייה</div>
+            <h1 className="text-2xl font-semibold flex items-center gap-3 flex-wrap mt-1">
+              {intake?.request_purpose?.slice(0, 80) ||
+                intake?.department_or_project ||
+                "פנייה ללא כותרת"}
               <StatusBadge status={req.status} />
-              <OutcomeBadge outcome={req.outcome} />
+              {savingField && (
+                <span className="text-xs text-slate-400">שומר...</span>
+              )}
             </h1>
           </div>
-          <button className="btn-secondary" onClick={() => nav("/dashboard")}>
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => nav("/dashboard")}
+          >
             ← חזרה לפניות
           </button>
         </div>
 
-        <div className="space-y-6">
-          {routing ? (
-            <RouteRecommendationCard routing={routing} showActions={false} />
-          ) : (
-            <LegacyRecommendationCard req={req} />
+        {intake ? (
+          <IntakeReviewCards
+            intake={intake}
+            onChange={handleIntakeChange}
+            missing={missing}
+          />
+        ) : (
+          <div className="card text-slate-500">
+            עוד אין סיכום מובנה לפנייה הזו.
+          </div>
+        )}
+
+        <div className="flex items-center gap-3 justify-end mt-8 flex-wrap pb-4">
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => nav("/requests/new")}
+          >
+            חזור לעריכת תיאור חופשי
+          </button>
+          <button
+            type="button"
+            className="btn-secondary"
+            disabled={!intake || action === "download"}
+            onClick={handleDownload}
+          >
+            {action === "download" ? "מכין מסמך..." : "📄 הורד מסמך Word"}
+          </button>
+          {req.status !== "ready_for_legal" && req.status !== "sent_to_legal" && (
+            <button
+              type="button"
+              className="btn-secondary"
+              disabled={!intake || action === "ready"}
+              onClick={handleReady}
+            >
+              {action === "ready" ? "מסמן..." : "סמן כמוכן להעברה למשפטית"}
+            </button>
           )}
-
-          {routing && <ExtractedFactsCard routing={routing} />}
-
-          <NextActionsCard req={req} onSendToLegal={sendDirectlyToLegal} />
-
-          {req.status === "sent_to_legal" && (
-            <div className="rounded-2xl bg-emerald-50 border border-emerald-200 p-4">
-              <div className="font-semibold text-emerald-800">
-                הפנייה סומנה כמיועדת לבדיקה משפטית
-              </div>
-              <div className="text-sm text-emerald-700 mt-1">
-                בשלב ה-POC לא נשלח מייל בפועל.
-              </div>
-            </div>
+          {req.status !== "sent_to_legal" && (
+            <button
+              type="button"
+              className="btn-primary"
+              disabled={!intake || action === "send"}
+              onClick={handleSend}
+            >
+              {action === "send" ? "שולח..." : "שלח לבדיקה משפטית"}
+            </button>
           )}
         </div>
       </div>
     </Layout>
-  );
-}
-
-/** Fallback recommendation card for legacy rows without llm_output. */
-function LegacyRecommendationCard({ req }: { req: RequestRecord }) {
-  return (
-    <div className="card">
-      <div className="flex items-center gap-3 mb-3">
-        <h2 className="font-semibold">המלצת המערכת</h2>
-        <OutcomeBadge outcome={req.outcome} />
-      </div>
-      <p className="text-slate-800 leading-relaxed">{req.description}</p>
-      {req.reasoning && (
-        <div className="mt-4 text-sm text-slate-500 border-r-2 border-slate-200 pr-3">
-          {req.reasoning}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function NextActionsCard({
-  req,
-  onSendToLegal,
-}: {
-  req: RequestRecord;
-  onSendToLegal: () => void;
-}) {
-  const nav = useNavigate();
-  const o = req.outcome;
-
-  if (o === "missing_info") {
-    return (
-      <div className="card">
-        <h3 className="font-semibold mb-3">הפעולות הבאות</h3>
-        <button
-          className="btn-primary w-full"
-          onClick={() => nav("/requests/new")}
-        >
-          פתח/י פנייה חדשה עם תיאור מפורט יותר
-        </button>
-      </div>
-    );
-  }
-  if (o === "legal_review") {
-    return (
-      <div className="card">
-        <h3 className="font-semibold mb-3">הפעולות הבאות</h3>
-        <div className="space-y-2">
-          <button
-            className="btn-primary w-full"
-            onClick={() => nav(`/requests/${req.id}/legal`)}
-          >
-            המשך להשלמת פרטים משפטיים
-          </button>
-          <button className="btn-secondary w-full" onClick={onSendToLegal}>
-            שלח לבדיקה משפטית עם המידע הקיים
-          </button>
-        </div>
-      </div>
-    );
-  }
-  if (o === "grant") {
-    return (
-      <div className="card">
-        <h3 className="font-semibold mb-3">הפעולות הבאות</h3>
-        <div className="space-y-2">
-          <a
-            className="btn-primary w-full"
-            href={GRANT_MASTER_DOC_URL}
-            target="_blank"
-            rel="noreferrer"
-          >
-            פתח מאסטר כתב התחייבות למענק
-          </a>
-          <button
-            className="btn-secondary w-full"
-            onClick={() => nav(`/requests/${req.id}/legal`)}
-          >
-            המשך לרשימת מסמכי מענק
-          </button>
-        </div>
-      </div>
-    );
-  }
-  if (o === "supplier_registration") {
-    return <SupplierRegistrationActions req={req} />;
-  }
-  if (o === "insurance_required") {
-    return (
-      <div className="card">
-        <h3 className="font-semibold mb-3">הפעולות הבאות</h3>
-        <div className="space-y-2">
-          <div className="rounded-lg bg-amber-50 border border-amber-200 text-amber-900 p-3 text-sm">
-            ניתן להתקדם בתנאי ההתקשרות הכלליים, ובמקביל יש להשלים אישור ביטוח
-            לפי סוג השירות.
-          </div>
-          <a
-            className="btn-primary w-full"
-            href={RASHI_GENERAL_TERMS_DOC_URL}
-            target="_blank"
-            rel="noreferrer"
-          >
-            הצג תנאי התקשרות כלליים
-          </a>
-          <button
-            className="btn-secondary w-full"
-            onClick={() => nav(`/requests/${req.id}/legal`)}
-          >
-            בכל זאת העבר לבדיקה משפטית
-          </button>
-        </div>
-      </div>
-    );
-  }
-  // general_terms
-  return (
-    <div className="card">
-      <h3 className="font-semibold mb-3">הפעולות הבאות</h3>
-      <div className="space-y-2">
-        <a
-          className="btn-primary w-full"
-          href={RASHI_GENERAL_TERMS_DOC_URL}
-          target="_blank"
-          rel="noreferrer"
-        >
-          הצג תנאי התקשרות כלליים
-        </a>
-        <p className="text-xs text-slate-500">
-          ספק במאגר + הצעת מחיר נקייה + הזמנת רכש חתומה לפי נוהל הקרן.
-        </p>
-        <button
-          className="btn-secondary w-full"
-          onClick={() => nav(`/requests/${req.id}/legal`)}
-        >
-          בכל זאת העבר לבדיקה משפטית
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function SupplierRegistrationActions({ req }: { req: RequestRecord }) {
-  const nav = useNavigate();
-  const [showMessage, setShowMessage] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const message = buildSupplierRegistrationMessage(req.supplier_name);
-
-  async function copyMessage() {
-    try {
-      await navigator.clipboard.writeText(message);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      /* clipboard blocked */
-    }
-  }
-
-  return (
-    <div className="card">
-      <h3 className="font-semibold mb-3">הפעולות הבאות</h3>
-      <div className="space-y-2">
-        <a
-          className="btn-primary w-full"
-          href={SAP_SUPPLIER_REGISTRATION_URL}
-          target="_blank"
-          rel="noreferrer"
-        >
-          פתח קישור רישום ספק (SAP)
-        </a>
-        <button
-          type="button"
-          className="btn-secondary w-full"
-          onClick={() => setShowMessage((s) => !s)}
-        >
-          {showMessage ? "הסתר הודעה לספק" : "צור הודעה לספק"}
-        </button>
-        {showMessage && (
-          <div className="rounded-lg bg-slate-50 border border-slate-200 p-3 space-y-2">
-            <pre className="whitespace-pre-wrap text-xs text-slate-700 font-sans">
-              {message}
-            </pre>
-            <button type="button" className="btn-ghost text-xs" onClick={copyMessage}>
-              {copied ? "✓ הועתק" : "העתק הודעה"}
-            </button>
-          </div>
-        )}
-        <p className="text-xs text-slate-500">
-          כחלק מהרישום הספק חותם על תנאי ההתקשרות הכלליים של הקרן.
-        </p>
-        <button
-          className="btn-secondary w-full"
-          onClick={() => nav(`/requests/${req.id}/legal`)}
-        >
-          בכל זאת העבר לבדיקה משפטית
-        </button>
-      </div>
-    </div>
   );
 }

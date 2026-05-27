@@ -1,131 +1,83 @@
-// Mirror of the JSON schemas in `supabase/functions/ai-request-router/schemas.ts`.
-// Keep these two files in sync. The edge function returns these exact shapes.
-
-import type { RoutingOutcome } from "./types";
-
-export type Confidence = "low" | "medium" | "high";
+// Frontend mirrors of the JSON schema in
+// `supabase/functions/ai-request-router/schemas.ts`.
 
 export type YesNoUnknown = "yes" | "no" | "unknown";
 
-export type AgreementTypeEstimateLLM =
-  | "service_purchase"
-  | "cooperation"
-  | "government_joint_venture"
-  | "grant"
-  | "sponsorship"
-  | "other"
-  | "unclear";
-
-export type SupplierStatusLLM =
-  | "registered"
-  | "not_registered"
-  | "unknown"
-  | "not_checked";
-
-export type QuoteCleanlinessLLM =
-  | "clean"
-  | "contains_supplier_terms"
+export type SecondPartyType =
+  | "company"
+  | "nonprofit"
+  | "public_body"
+  | "individual"
   | "unknown";
 
-export type TriggerType =
-  | "legal"
-  | "insurance"
-  | "grant"
-  | "supplier"
-  | "missing"
-  | "general";
+export type AgreementState = "new" | "existing" | "extension" | "unknown";
 
-export interface DetectedTrigger {
-  type: TriggerType;
-  label_he: string;
-  explanation_he: string;
+export type Currency = "ILS" | "unknown";
+
+export type Topic =
+  | "basic_details"
+  | "commercial"
+  | "supplier_selection"
+  | "documents"
+  | "risks"
+  | "grant"
+  | "privacy"
+  | "other";
+
+export type Importance = "high" | "medium" | "low";
+
+export interface IntakeSummary {
+  department_or_project: string | null;
+  request_purpose: string | null;
+  background: string | null;
+  second_party_name: string | null;
+  second_party_type: SecondPartyType;
+  party_roles: string | null;
+  amount: number | null;
+  currency: Currency;
+  timeline: string | null;
+  is_new_or_existing: AgreementState;
+  quote_exists: YesNoUnknown;
+  quote_details: string | null;
+  supplier_selected: YesNoUnknown;
+  selection_process: string | null;
+  partners_involved: string | null;
+  documents_mentioned: string[];
+  privacy_or_personal_data: YesNoUnknown;
+  ip_or_copyrights: YesNoUnknown;
+  participant_photography: YesNoUnknown;
+  insurance_or_operational_risk: YesNoUnknown;
+  subcontractors: YesNoUnknown;
+  supplier_terms_or_contract: YesNoUnknown;
+  grant_related: YesNoUnknown;
+  special_notes: string[];
 }
 
-export interface MissingField {
+export interface MissingItem {
   field: string;
   question_he: string;
-  importance: "low" | "medium" | "high";
+  importance: Importance;
+  topic: Topic;
 }
 
-export interface RoutingRequestSummary {
-  purpose: string;
-  department_or_project: string | null;
-  second_party: string | null;
-  supplier_status: SupplierStatusLLM;
-  amount: number | null;
-  timeline: string | null;
-  party_roles: string | null;
-  documents_mentioned: string[];
-}
-
-export interface RoutingResponse {
-  request_summary: RoutingRequestSummary;
-  route: RoutingOutcome;
-  route_label_he: string;
-  confidence: Confidence;
-  reasoning_summary_he: string;
-  detected_triggers: DetectedTrigger[];
-  quote_assessment: {
-    quote_exists: YesNoUnknown;
-    quote_cleanliness: QuoteCleanlinessLLM;
-    supplier_terms_detected: string[];
-  };
-  missing_for_routing: MissingField[];
+export interface IntakeResponse {
+  intake_summary: IntakeSummary;
+  known_information_he: string[];
+  missing_information: MissingItem[];
   next_questions_he: string[];
   can_continue_with_partial_info: boolean;
-  user_facing_message_he: string;
-}
-
-export interface LegalCase {
-  department_or_project: string | null;
-  purpose: string;
-  second_party: string | null;
-  supplier_status: string | null;
-  agreement_type_estimate: AgreementTypeEstimateLLM;
-  party_roles: string | null;
-  amount: number | null;
-  timeline: string | null;
-  quote_exists: YesNoUnknown;
-  supplier_selected: YesNoUnknown;
-  competitive_process: YesNoUnknown;
-  single_supplier: YesNoUnknown;
-  partners: YesNoUnknown;
-  privacy_or_personal_data: YesNoUnknown;
-  copyrights_or_ip: YesNoUnknown;
-  participant_photography: YesNoUnknown;
-  insurance_required: YesNoUnknown;
-  subcontractors: YesNoUnknown;
-  supplier_terms: string[];
-  documents: string[];
-  risks_and_exceptions: string[];
-  missing_info: string[];
-  reason_for_legal_review: string;
-}
-
-export interface LegalIntakeResponse {
-  legal_case: LegalCase;
-  questions_to_complete_he: string[];
-  ready_for_summary: boolean;
   assistant_message_he: string;
+  ready_for_final_summary: boolean;
 }
 
 export interface ChatMessage {
   role: "user" | "assistant" | "system";
   content: string;
-  ts: string; // ISO timestamp
+  ts: string;
 }
 
-export type ChatStep =
-  | "describe"        // user typing original description
-  | "clarify"         // assistant asking 1-3 follow-up questions
-  | "review_route"    // user reviewing proposed route
-  | "legal_chat"      // legal-intake chat (only for legal_review)
-  | "final_summary";  // final cards + DOCX
-
-export interface ChatRequestState {
-  step: ChatStep;
-  messages: ChatMessage[];
-  routing?: RoutingResponse;
-  legal?: LegalIntakeResponse;
-  selectedRoute?: RoutingOutcome;
-}
+export type IntakeStep =
+  | "describe"
+  | "chat"
+  | "review"
+  | "ready";

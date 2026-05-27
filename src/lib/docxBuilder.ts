@@ -9,49 +9,62 @@ import {
 } from "docx";
 import { saveAs } from "file-saver";
 import type {
-  AgreementTypeEstimateLLM,
-  LegalCase,
+  AgreementState,
+  Currency,
+  IntakeSummary,
+  IntakeResponse,
+  SecondPartyType,
   YesNoUnknown,
 } from "./aiTypes";
 import type { RequestRecord } from "./types";
-import { OUTCOME_LABEL } from "../components/OutcomeBadge";
 
-const AGREEMENT_LABEL: Record<AgreementTypeEstimateLLM, string> = {
-  service_purchase: "רכישת שירות / מוצר",
-  cooperation: "שיתוף פעולה",
-  government_joint_venture: "מיזם משותף עם גוף ציבורי / ממשלתי",
-  grant: "מענק / תמיכה",
-  sponsorship: "חסות / תרומה",
-  other: "אחר",
-  unclear: "לא ברור — נדרשת ולידציה משפטית",
+const SECOND_PARTY_LABEL: Record<SecondPartyType, string> = {
+  company: "חברה",
+  nonprofit: "עמותה / מלכ״ר",
+  public_body: "גוף ציבורי / ממשלתי",
+  individual: "אדם פרטי",
+  unknown: "לא ידוע",
+};
+
+const AGREEMENT_LABEL: Record<AgreementState, string> = {
+  new: "חדש",
+  existing: "קיים",
+  extension: "הארכה",
+  unknown: "לא ידוע",
+};
+
+const CURRENCY_LABEL: Record<Currency, string> = {
+  ILS: "₪",
+  unknown: "—",
 };
 
 interface BuildContext {
   req: RequestRecord;
-  legal: LegalCase;
+  intake: IntakeSummary;
   requesterName: string;
   requesterEmail: string;
 }
 
 /**
- * Build and download a Hebrew RTL Word document summarising the legal-review
- * request. Triggered from the LegalConfirmation screen.
+ * Build and download a Hebrew RTL Word document — "סיכום פנייה למחלקה
+ * המשפטית". No routing/recommendation language anywhere.
  */
 export async function downloadLegalReviewDocx(ctx: BuildContext): Promise<void> {
   const doc = buildDocument(ctx);
   const blob = await Packer.toBlob(doc);
   const supplier =
-    (ctx.legal.second_party || ctx.req.supplier_name || "פנייה").replace(
+    (ctx.intake.second_party_name || ctx.req.supplier_name || "פנייה").replace(
       /[^\w֐-׿ -]+/g,
       "_"
     );
   const date = new Date().toISOString().slice(0, 10);
-  saveAs(blob, `פנייה_משפטית_${supplier}_${date}.docx`);
+  saveAs(blob, `סיכום_פנייה_${supplier}_${date}.docx`);
 }
 
 function buildDocument(ctx: BuildContext): Document {
-  const { req, legal } = ctx;
+  const { req, intake } = ctx;
   const dateStr = new Date().toLocaleDateString("he-IL");
+  const llm = req.llm_output as IntakeResponse | null;
 
   const children: Paragraph[] = [];
 
@@ -63,7 +76,7 @@ function buildDocument(ctx: BuildContext): Document {
       heading: HeadingLevel.TITLE,
       children: [
         new TextRun({
-          text: "פנייה לבדיקה משפטית",
+          text: "סיכום פנייה למחלקה המשפטית",
           bold: true,
           rightToLeft: true,
           size: 40,
@@ -77,7 +90,7 @@ function buildDocument(ctx: BuildContext): Document {
       bidirectional: true,
       children: [
         new TextRun({
-          text: `קרן רש״י — מסלול: ${req.outcome ? OUTCOME_LABEL[req.outcome] : "—"}`,
+          text: `קרן רש״י • הוכן בתאריך ${dateStr}`,
           rightToLeft: true,
           color: "666666",
         }),
@@ -88,29 +101,31 @@ function buildDocument(ctx: BuildContext): Document {
 
   // 1. פרטי הפנייה
   pushHeading(children, "1. פרטי הפנייה");
-  pushKV(children, "מחלקה / מיזם", legal.department_or_project || req.department || "—");
+  pushKV(children, "מחלקה / מיזם", intake.department_or_project || req.department || "—");
   pushKV(children, "שם הפונה", ctx.requesterName || "—");
   pushKV(children, "אימייל הפונה", ctx.requesterEmail || "—");
-  pushKV(children, "תאריך הכנת הפנייה", dateStr);
   children.push(emptyLine());
 
-  // 2. מטרת ההתקשרות
-  pushHeading(children, "2. מטרת ההתקשרות");
-  pushParagraph(children, legal.purpose || req.description || "—");
-  if (legal.party_roles) {
-    pushKV(children, "תפקיד כל צד", legal.party_roles);
+  // 2. מטרת הפנייה והרקע
+  pushHeading(children, "2. מטרת הפנייה והרקע");
+  pushParagraph(children, intake.request_purpose || req.description || "—");
+  if (intake.background) {
+    pushParagraph(children, intake.background);
   }
   children.push(emptyLine());
 
-  // 3. הצד השני / ספק
-  pushHeading(children, "3. הצד השני / ספק");
-  pushKV(children, "שם", legal.second_party || req.supplier_name || "—");
-  pushKV(children, "סטטוס", legal.supplier_status || "—");
+  // 3. הצד השני / הגורם המעורב
+  pushHeading(children, "3. הצד השני / הגורם המעורב");
+  pushKV(children, "שם", intake.second_party_name || "—");
+  pushKV(children, "סוג", SECOND_PARTY_LABEL[intake.second_party_type]);
   children.push(emptyLine());
 
-  // 4. סוג ההתקשרות המשוער
-  pushHeading(children, "4. סוג ההתקשרות המשוער");
-  pushParagraph(children, AGREEMENT_LABEL[legal.agreement_type_estimate]);
+  // 4. חלקו של כל צד בהתקשרות
+  pushHeading(children, "4. חלקו של כל צד בהתקשרות");
+  pushParagraph(children, intake.party_roles || "—");
+  if (intake.partners_involved) {
+    pushKV(children, "שותפים נוספים", intake.partners_involved);
+  }
   children.push(emptyLine());
 
   // 5. פרטים מסחריים
@@ -118,65 +133,65 @@ function buildDocument(ctx: BuildContext): Document {
   pushKV(
     children,
     "סכום",
-    legal.amount != null ? `${legal.amount.toLocaleString("he-IL")} ₪` : "—"
+    intake.amount != null
+      ? `${intake.amount.toLocaleString("he-IL")} ${CURRENCY_LABEL[intake.currency]}`
+      : "—"
   );
-  pushKV(children, "לוח זמנים", legal.timeline || "—");
-  pushKV(children, "קיימת הצעת מחיר?", yn(legal.quote_exists));
-  if (legal.supplier_terms.length > 0) {
-    pushParagraph(children, "תנאי ספק שזוהו:");
-    for (const t of legal.supplier_terms) {
-      pushBullet(children, t);
-    }
+  pushKV(children, "לוח זמנים", intake.timeline || "—");
+  pushKV(children, "חדש / קיים / הארכה", AGREEMENT_LABEL[intake.is_new_or_existing]);
+  pushKV(children, "קיימת הצעת מחיר?", yn(intake.quote_exists));
+  if (intake.quote_details) {
+    pushParagraph(children, `פרטי הצעת המחיר: ${intake.quote_details}`);
   }
   children.push(emptyLine());
 
-  // 6. תהליך בחירת ספק
-  pushHeading(children, "6. תהליך בחירת ספק");
-  pushKV(children, "הספק נבחר?", yn(legal.supplier_selected));
-  pushKV(children, "בוצע הליך תחרותי?", yn(legal.competitive_process));
-  pushKV(children, "ספק יחיד?", yn(legal.single_supplier));
-  children.push(emptyLine());
-
-  // 7. סיכונים וחריגים
-  pushHeading(children, "7. סיכונים וחריגים");
-  pushKV(children, "פרטיות / מידע אישי", yn(legal.privacy_or_personal_data));
-  pushKV(children, "זכויות יוצרים / קניין רוחני", yn(legal.copyrights_or_ip));
-  pushKV(children, "צילום משתתפים", yn(legal.participant_photography));
-  pushKV(children, "נדרש ביטוח", yn(legal.insurance_required));
-  pushKV(children, "שותפים למיזם", yn(legal.partners));
-  pushKV(children, "ספקי משנה", yn(legal.subcontractors));
-  if (legal.risks_and_exceptions.length > 0) {
-    pushParagraph(children, "סיכונים נוספים:");
-    for (const r of legal.risks_and_exceptions) pushBullet(children, r);
-  }
-  children.push(emptyLine());
-
-  // 8. מסמכים
-  pushHeading(children, "8. מסמכים שצורפו או הוזכרו");
-  if (legal.documents.length === 0) {
+  // 6. מסמכים שצורפו או הוזכרו
+  pushHeading(children, "6. מסמכים שצורפו או הוזכרו");
+  if (intake.documents_mentioned.length === 0) {
     pushParagraph(children, "—");
   } else {
-    for (const d of legal.documents) pushBullet(children, d);
+    for (const d of intake.documents_mentioned) pushBullet(children, d);
   }
   children.push(emptyLine());
 
-  // 9. מידע להשלמה
-  pushHeading(children, "9. מידע להשלמה בהמשך");
-  const missing = legal.missing_info.slice(0, 5);
+  // 7. תהליך בחירת ספק / גורם
+  pushHeading(children, "7. תהליך בחירת ספק / גורם");
+  pushKV(children, "הספק / הגורם נבחר?", yn(intake.supplier_selected));
+  pushParagraph(children, intake.selection_process || "—");
+  children.push(emptyLine());
+
+  // 8. נושאים שדורשים תשומת לב משפטית
+  pushHeading(children, "8. נושאים שדורשים תשומת לב משפטית");
+  pushKV(children, "פרטיות / מידע אישי", yn(intake.privacy_or_personal_data));
+  pushKV(children, "זכויות יוצרים / IP", yn(intake.ip_or_copyrights));
+  pushKV(children, "צילום משתתפים", yn(intake.participant_photography));
+  pushKV(children, "ביטוח / סיכון תפעולי", yn(intake.insurance_or_operational_risk));
+  pushKV(children, "ספקי משנה", yn(intake.subcontractors));
+  pushKV(children, "תנאי ספק / חוזה של הספק", yn(intake.supplier_terms_or_contract));
+  pushKV(children, "רכיב מענק", yn(intake.grant_related));
+  children.push(emptyLine());
+
+  // 9. מידע חסר להשלמה
+  pushHeading(children, "9. מידע חסר להשלמה");
+  const missing = llm?.missing_information ?? [];
   if (missing.length === 0) {
     pushParagraph(children, "—");
   } else {
-    for (const m of missing) pushBullet(children, m);
+    for (const m of missing.slice(0, 8)) pushBullet(children, m.question_he);
   }
   children.push(emptyLine());
 
-  // 10. סיבת ההעברה למשפטית
-  pushHeading(children, "10. סיבת ההעברה למשפטית");
-  pushParagraph(children, legal.reason_for_legal_review || req.reasoning || "—");
+  // 10. הערות נוספות
+  pushHeading(children, "10. הערות נוספות");
+  if (intake.special_notes.length === 0) {
+    pushParagraph(children, "—");
+  } else {
+    for (const n of intake.special_notes) pushBullet(children, n);
+  }
 
   return new Document({
-    creator: "Rashi Bot",
-    title: "פנייה לבדיקה משפטית",
+    creator: "Rashi Legal Intake Bot",
+    title: "סיכום פנייה למחלקה המשפטית",
     styles: {
       default: { document: { run: { font: "Arial", size: 22 } } },
     },
@@ -223,7 +238,9 @@ function pushHeading(out: Paragraph[], text: string) {
       bidirectional: true,
       heading: HeadingLevel.HEADING_2,
       spacing: { before: 200, after: 100 },
-      children: [new TextRun({ text, bold: true, rightToLeft: true, size: 28 })],
+      children: [
+        new TextRun({ text, bold: true, rightToLeft: true, size: 28 }),
+      ],
     })
   );
 }

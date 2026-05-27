@@ -1,15 +1,10 @@
 import { supabase, REQUESTS_TABLE, FILES_BUCKET } from "./supabase";
 import type {
   RequestRecord,
-  ClassificationResult,
   LegalIntakePayload,
   RequestStatus,
 } from "./types";
-import type {
-  ChatMessage,
-  LegalIntakeResponse,
-  RoutingResponse,
-} from "./aiTypes";
+import type { ChatMessage, IntakeResponse, IntakeSummary } from "./aiTypes";
 
 export interface NewRequestDraft {
   department: string;
@@ -18,6 +13,10 @@ export interface NewRequestDraft {
   amount: number | null;
   files: File[];
 }
+
+// ---------------------------------------------------------------------------
+// Storage
+// ---------------------------------------------------------------------------
 
 export async function uploadFiles(
   userId: string,
@@ -37,27 +36,54 @@ export async function uploadFiles(
   return paths;
 }
 
-export async function createRequest(args: {
+export async function fileSignedUrl(path: string): Promise<string | null> {
+  const { data, error } = await supabase.storage
+    .from(FILES_BUCKET)
+    .createSignedUrl(path, 60 * 10);
+  if (error) return null;
+  return data.signedUrl;
+}
+
+// ---------------------------------------------------------------------------
+// Intake persistence
+// ---------------------------------------------------------------------------
+
+/**
+ * Create a new intake request after the first AI turn. The product is no longer
+ * about routing, so we don't store `outcome` as a routing decision — it's just
+ * a "primary topic" tag for organising the dashboard.
+ *
+ * Original free text → `description`.
+ * Full chat history  → `chat_messages`.
+ * Latest LLM response → `llm_output`.
+ * Latest structured intake summary → `legal_case` (re-used column).
+ */
+export async function createIntakeRequest(args: {
   userId: string;
   userEmail: string | null;
-  draft: NewRequestDraft;
-  classification: ClassificationResult;
-  filePaths: string[];
+  description: string;
+  chatMessages: ChatMessage[];
+  intake: IntakeResponse;
 }): Promise<RequestRecord> {
-  const { userId, userEmail, draft, classification, filePaths } = args;
+  const s = args.intake.intake_summary;
   const payload = {
-    user_id: userId,
-    user_email: userEmail,
-    department: draft.department,
-    description: draft.description,
-    supplier_name: draft.supplierName || null,
-    amount: draft.amount,
-    file_paths: filePaths,
-    outcome: classification.outcome,
-    status: "classified" as RequestStatus,
-    reasoning: classification.reasoning,
-    tags: classification.tags,
+    user_id: args.userId,
+    user_email: args.userEmail,
+    department: s.department_or_project ?? "",
+    description: args.description,
+    supplier_name: s.second_party_name ?? null,
+    amount: s.amount ?? null,
+    file_paths: [],
+    outcome: null, // No routing decision anymore.
+    status: "draft" as RequestStatus,
+    reasoning: null,
+    tags: deriveTopicTags(args.intake),
     legal_intake: null,
+    chat_messages: args.chatMessages,
+    llm_output: args.intake,
+    legal_case: s, // The current intake_summary (editable).
+    selected_route: null,
+    route_confidence: null,
   };
   const { data, error } = await supabase
     .from(REQUESTS_TABLE)
@@ -68,6 +94,82 @@ export async function createRequest(args: {
   return data as RequestRecord;
 }
 
+/** Append turns to the chat and update the latest intake snapshot. */
+export async function updateIntake(args: {
+  id: string;
+  chatMessages: ChatMessage[];
+  intake: IntakeResponse;
+}): Promise<RequestRecord> {
+  const s = args.intake.intake_summary;
+  const { data, error } = await supabase
+    .from(REQUESTS_TABLE)
+    .update({
+      chat_messages: args.chatMessages,
+      llm_output: args.intake,
+      legal_case: s,
+      department: s.department_or_project ?? "",
+      supplier_name: s.second_party_name ?? null,
+      amount: s.amount ?? null,
+      tags: deriveTopicTags(args.intake),
+    })
+    .eq("id", args.id)
+    .select("*")
+    .single();
+  if (error) throw error;
+  return data as RequestRecord;
+}
+
+/**
+ * Save the user's edits to the intake summary. This is the screen where the
+ * user can override anything the LLM extracted.
+ */
+export async function saveEditedIntake(
+  id: string,
+  edited: IntakeSummary
+): Promise<RequestRecord> {
+  const { data, error } = await supabase
+    .from(REQUESTS_TABLE)
+    .update({
+      legal_case: edited,
+      department: edited.department_or_project ?? "",
+      supplier_name: edited.second_party_name ?? null,
+      amount: edited.amount ?? null,
+    })
+    .eq("id", id)
+    .select("*")
+    .single();
+  if (error) throw error;
+  return data as RequestRecord;
+}
+
+/** Mark the request as ready for legal review (button on review screen). */
+export async function markReadyForLegal(id: string): Promise<RequestRecord> {
+  const { data, error } = await supabase
+    .from(REQUESTS_TABLE)
+    .update({ status: "ready_for_legal" })
+    .eq("id", id)
+    .select("*")
+    .single();
+  if (error) throw error;
+  return data as RequestRecord;
+}
+
+/** Mark the request as sent to legal (POC stub — no real email). */
+export async function markSentToLegal(id: string): Promise<RequestRecord> {
+  const { data, error } = await supabase
+    .from(REQUESTS_TABLE)
+    .update({ status: "sent_to_legal" })
+    .eq("id", id)
+    .select("*")
+    .single();
+  if (error) throw error;
+  return data as RequestRecord;
+}
+
+// ---------------------------------------------------------------------------
+// Reads
+// ---------------------------------------------------------------------------
+
 export async function listMyRequests(userId: string): Promise<RequestRecord[]> {
   const { data, error } = await supabase
     .from(REQUESTS_TABLE)
@@ -76,28 +178,6 @@ export async function listMyRequests(userId: string): Promise<RequestRecord[]> {
     .order("created_at", { ascending: false });
   if (error) throw error;
   return (data ?? []) as RequestRecord[];
-}
-
-export async function deleteRequest(req: RequestRecord): Promise<void> {
-  const paths = [
-    ...req.file_paths,
-    ...(req.legal_intake?.extraFilePaths ?? []),
-  ];
-  if (paths.length > 0) {
-    const { error: storageError } = await supabase.storage
-      .from(FILES_BUCKET)
-      .remove(paths);
-    if (storageError) {
-      // Deleting the request is still useful even if old attachments remain.
-      console.warn("Could not delete request files", storageError);
-    }
-  }
-
-  const { error } = await supabase
-    .from(REQUESTS_TABLE)
-    .delete()
-    .eq("id", req.id);
-  if (error) throw error;
 }
 
 export async function getRequest(id: string): Promise<RequestRecord | null> {
@@ -110,6 +190,34 @@ export async function getRequest(id: string): Promise<RequestRecord | null> {
   return (data ?? null) as RequestRecord | null;
 }
 
+export async function deleteRequest(req: RequestRecord): Promise<void> {
+  const paths = [
+    ...req.file_paths,
+    ...((req.legal_intake?.extraFilePaths as string[] | undefined) ?? []),
+  ];
+  if (paths.length > 0) {
+    const { error: storageError } = await supabase.storage
+      .from(FILES_BUCKET)
+      .remove(paths);
+    if (storageError) {
+      console.warn("Could not delete request files", storageError);
+    }
+  }
+  const { error } = await supabase
+    .from(REQUESTS_TABLE)
+    .delete()
+    .eq("id", req.id);
+  if (error) throw error;
+}
+
+// ---------------------------------------------------------------------------
+// Legacy compatibility — used only by old code paths
+// ---------------------------------------------------------------------------
+
+/**
+ * @deprecated Old API used by the previous routing/intake forms.
+ * Kept as a thin shim so existing code paths don't fail typecheck.
+ */
 export async function updateLegalIntake(
   id: string,
   payload: LegalIntakePayload
@@ -124,143 +232,19 @@ export async function updateLegalIntake(
   return data as RequestRecord;
 }
 
-export async function updateRequestClassification(args: {
-  id: string;
-  description: string;
-  classification: ClassificationResult;
-}): Promise<RequestRecord> {
-  const { id, description, classification } = args;
-  const { data, error } = await supabase
-    .from(REQUESTS_TABLE)
-    .update({
-      description,
-      outcome: classification.outcome,
-      reasoning: classification.reasoning,
-      tags: classification.tags,
-      legal_intake: null,
-      status: "classified" as RequestStatus,
-    })
-    .eq("id", id)
-    .select("*")
-    .single();
-  if (error) throw error;
-  return data as RequestRecord;
-}
-
-export async function markSentToLegal(id: string): Promise<RequestRecord> {
-  const { data, error } = await supabase
-    .from(REQUESTS_TABLE)
-    .update({ status: "sent_to_legal" })
-    .eq("id", id)
-    .select("*")
-    .single();
-  if (error) throw error;
-  return data as RequestRecord;
-}
-
 // ---------------------------------------------------------------------------
-// Chat-first persistence
+// Helpers
 // ---------------------------------------------------------------------------
 
-/**
- * Create a new request from the chat-first flow. We persist the original free
- * text in `description` (so the existing UI keeps working), plus the full chat
- * history and the LLM routing output in the new columns added by migration
- * 0004_chat_columns.sql.
- */
-export async function createChatRequest(args: {
-  userId: string;
-  userEmail: string | null;
-  description: string;
-  chatMessages: ChatMessage[];
-  routing: RoutingResponse;
-}): Promise<RequestRecord> {
-  const { userId, userEmail, description, chatMessages, routing } = args;
-  const payload = {
-    user_id: userId,
-    user_email: userEmail,
-    department: routing.request_summary.department_or_project ?? "",
-    description,
-    supplier_name: routing.request_summary.second_party ?? null,
-    amount: routing.request_summary.amount ?? null,
-    file_paths: [],
-    outcome: routing.route,
-    status: "classified" as RequestStatus,
-    reasoning: routing.reasoning_summary_he,
-    tags: routing.detected_triggers.map((t) => t.label_he),
-    legal_intake: null,
-    chat_messages: chatMessages,
-    llm_output: routing,
-    selected_route: routing.route,
-    route_confidence: routing.confidence,
-  };
-  const { data, error } = await supabase
-    .from(REQUESTS_TABLE)
-    .insert(payload)
-    .select("*")
-    .single();
-  if (error) throw error;
-  return data as RequestRecord;
-}
-
-/** Append a turn to the chat history and (optionally) update the LLM output. */
-export async function appendChatTurns(args: {
-  id: string;
-  messages: ChatMessage[];
-  routing?: RoutingResponse;
-}): Promise<RequestRecord> {
-  const update: Record<string, unknown> = { chat_messages: args.messages };
-  if (args.routing) {
-    update.llm_output = args.routing;
-    update.outcome = args.routing.route;
-    update.tags = args.routing.detected_triggers.map((t) => t.label_he);
-    update.reasoning = args.routing.reasoning_summary_he;
-    update.route_confidence = args.routing.confidence;
-  }
-  const { data, error } = await supabase
-    .from(REQUESTS_TABLE)
-    .update(update)
-    .eq("id", args.id)
-    .select("*")
-    .single();
-  if (error) throw error;
-  return data as RequestRecord;
-}
-
-/** Mark which route the user approved (may differ from the LLM proposal). */
-export async function approveRoute(
-  id: string,
-  route: RequestRecord["outcome"]
-): Promise<RequestRecord> {
-  const { data, error } = await supabase
-    .from(REQUESTS_TABLE)
-    .update({ selected_route: route, outcome: route })
-    .eq("id", id)
-    .select("*")
-    .single();
-  if (error) throw error;
-  return data as RequestRecord;
-}
-
-/** Persist the latest legal-intake structured output. */
-export async function saveLegalCase(
-  id: string,
-  legal: LegalIntakeResponse
-): Promise<RequestRecord> {
-  const { data, error } = await supabase
-    .from(REQUESTS_TABLE)
-    .update({ legal_case: legal.legal_case })
-    .eq("id", id)
-    .select("*")
-    .single();
-  if (error) throw error;
-  return data as RequestRecord;
-}
-
-export async function fileSignedUrl(path: string): Promise<string | null> {
-  const { data, error } = await supabase.storage
-    .from(FILES_BUCKET)
-    .createSignedUrl(path, 60 * 10);
-  if (error) return null;
-  return data.signedUrl;
+function deriveTopicTags(intake: IntakeResponse): string[] {
+  const tags: string[] = [];
+  const s = intake.intake_summary;
+  if (s.grant_related === "yes") tags.push("מענק");
+  if (s.supplier_terms_or_contract === "yes") tags.push("תנאי ספק");
+  if (s.privacy_or_personal_data === "yes") tags.push("פרטיות");
+  if (s.ip_or_copyrights === "yes") tags.push("זכויות יוצרים");
+  if (s.participant_photography === "yes") tags.push("צילום משתתפים");
+  if (s.insurance_or_operational_risk === "yes") tags.push("ביטוח");
+  if (s.partners_involved) tags.push("שותפים");
+  return tags;
 }
