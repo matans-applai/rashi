@@ -5,8 +5,6 @@ import StepIndicator from "../components/chat/StepIndicator";
 import ChatBubble from "../components/chat/ChatBubble";
 import ChatInput from "../components/chat/ChatInput";
 import AiThinkingState from "../components/chat/AiThinkingState";
-import KnownInfoCard from "../components/chat/KnownInfoCard";
-import MissingInfoQuestions from "../components/chat/MissingInfoQuestions";
 import AIErrorPanel from "../components/chat/AIErrorPanel";
 import FileUpload from "../components/chat/FileUpload";
 import { useAuth } from "../lib/auth";
@@ -192,13 +190,6 @@ export default function NewRequest() {
 
             {!error && intake && (
               <>
-                <KnownInfoCard intake={intake} />
-                {!intake.ready_for_final_summary &&
-                  intake.next_questions_he.length > 0 && (
-                    <MissingInfoQuestions
-                      questions={intake.next_questions_he}
-                    />
-                  )}
                 <ChatInput
                   placeholder='ענה/י כאן, או כתבו "תמשיך" כדי לעבור לסיכום'
                   onSend={sendTurn}
@@ -213,21 +204,21 @@ export default function NewRequest() {
                     onFilesChange={setUploadedFiles}
                   />
                 )}
-                <div className="flex items-center gap-3 justify-end pt-2 flex-wrap">
+                <div className="flex items-center gap-3 justify-start pt-2 flex-wrap">
                   <button
                     type="button"
-                    className="btn-secondary"
+                    className="text-xs text-slate-400 hover:text-slate-600 transition-colors"
                     onClick={() => nav("/dashboard")}
                   >
                     שמור וצא
                   </button>
                   <button
                     type="button"
-                    className="btn-primary"
+                    className="text-xs text-brand-600 hover:text-brand-700 font-medium transition-colors"
                     onClick={goToReview}
                     disabled={persisting || !recordId}
                   >
-                    {persisting ? "טוען..." : "המשך לסיכום"}
+                    {persisting ? "טוען..." : "המשך לסיכום →"}
                   </button>
                 </div>
               </>
