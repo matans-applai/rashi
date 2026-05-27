@@ -5,6 +5,7 @@ import { getRequest, markSentToLegal } from "../lib/requests";
 import { useAuth, getUserDisplayName } from "../lib/auth";
 import type { RequestRecord } from "../lib/types";
 import { OutcomeBadge } from "../components/OutcomeBadge";
+import { downloadLegalReviewDocx } from "../lib/docxBuilder";
 
 export default function LegalConfirmation() {
   const { id } = useParams();
@@ -143,7 +144,20 @@ export default function LegalConfirmation() {
         </div>
       )}
 
-      <div className="flex items-center gap-3 justify-end mt-6">
+      <div className="flex items-center gap-3 justify-end mt-6 flex-wrap">
+        <button
+          type="button"
+          className="btn-secondary"
+          onClick={() =>
+            downloadLegalReviewDocx({
+              req,
+              requesterName: getUserDisplayName(user),
+              requesterEmail: user?.email ?? "",
+            })
+          }
+        >
+          📄 הורד מסמך Word לבדיקה משפטית
+        </button>
         <button
           className="btn-secondary"
           onClick={() => nav(`/requests/${req.id}/legal`)}

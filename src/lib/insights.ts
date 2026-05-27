@@ -8,23 +8,28 @@ export interface RequestUnderstanding {
 }
 
 const OUTCOME_ACTION: Record<RoutingOutcome, string> = {
-  general_terms: "אפשר להתקדם עם טופס רכש / פרוטוקול בחירת ספק רגיל.",
-  supplier_registration: "רשומת עבר: פתיחת ספק חדש מתבצעת כיום דרך הקישור ליד שדה הספק.",
-  insurance_required: "יש להשלים בדיקת ביטוח לפני המשך ההתקשרות.",
-  legal_review: "יש להשלים פרטים ולהעביר לבדיקה משפטית.",
-  missing_info: "צריך להשלים פרטים בסיסיים לפני שניתן להחליט על מסלול.",
+  general_terms:
+    "אפשר להתקדם בתנאי ההתקשרות הכלליים של הקרן + הצעת מחיר נקייה + הזמנת רכש חתומה.",
+  supplier_registration:
+    "יש להשלים רישום ספק במאגר 2026 לפני המשך התקשרות (כולל חתימה על תנאי ההתקשרות הכלליים).",
+  insurance_required:
+    "ניתן להתקדם בתנאי ההתקשרות הכלליים, אך יש להשלים אישור ביטוח לפי סוג השירות.",
+  legal_review: "יש להשלים פרטים קצרים ולהעביר לבדיקה משפטית.",
+  grant: "מסלול מענק — שימוש במאסטר כתב התחייבות והשלמת חבילת מסמכי המענק.",
+  missing_info: "נדרש מידע בסיסי כדי לסווג את הפנייה.",
 };
 
 export function buildRequestUnderstanding(req: RequestRecord): RequestUnderstanding {
   const desc = req.description.trim();
   const observations = buildObservations(req);
-  const missing = buildMissing(req);
+  const missing = buildMissing(req).slice(0, 3); // cap to 3 — don't overwhelm
 
   return {
     facts: [
       { label: "מיזם / מחלקה", value: req.department || "לא צויין" },
       { label: "מטרת ההתקשרות", value: extractPurpose(desc) || "לא זוהתה" },
-      { label: "ספק", value: req.supplier_name || "לא צויין" },
+      { label: "ספק / צד שני", value: req.supplier_name || "לא צויין" },
+      { label: "סטטוס ספק במאגר", value: supplierStatusLabel(req) },
       {
         label: "סכום משוער",
         value:
@@ -50,6 +55,15 @@ export function buildRequestUnderstanding(req: RequestRecord): RequestUnderstand
   };
 }
 
+function supplierStatusLabel(req: RequestRecord): string {
+  if (!req.supplier_name) return "לא צויין ספק";
+  const s = lookupSupplier(req.supplier_name);
+  if (!s) return "לא נמצא במאגר הדמו";
+  if (s.status === "registered") return "רשום במאגר 2026";
+  if (s.status === "not_registered") return "לא רשום במאגר 2026";
+  return "סטטוס לא ברור";
+}
+
 function buildObservations(req: RequestRecord): string[] {
   const desc = req.description;
   const observations: string[] = [];
@@ -58,6 +72,37 @@ function buildObservations(req: RequestRecord): string[] {
     if (!observations.includes(text)) observations.push(text);
   };
 
+  // Grant triggers
+  if (
+    hasAny(desc, ["מענק", "תמיכה", "עמותה", 'חל"צ', "חלצ", 'מלכ"ר', "מלכר", "גוף נתמך"])
+  ) {
+    add("זוהו רכיבי מסלול מענק — העברת כספים לפעילות של הצד השני, ולא רכישת שירות עבור הקרן.");
+  }
+
+  // Supplier-terms triggers (legal_review pressure)
+  if (
+    hasAny(desc, [
+      "הסכם של הספק",
+      "חוזה של הספק",
+      "תנאי תשלום",
+      "תנאי ביטול",
+      "פיצוי מוסכם",
+      "מקדמה",
+      "תשלום מראש",
+      "זכויות פרסום",
+      "שמירת בעלות",
+      "בעלות על תוצרים",
+      "שימוש חוזר",
+      "אחריות מקצועית",
+      "סודיות",
+      "NDA",
+    ])
+  ) {
+    add(
+      "ההצעה / התיאור כוללים תנאי ספק חריגים (תנאי תשלום, ביטול, IP, אחריות וכו') ולכן ההצעה אינה נחשבת 'נקייה' — נדרשת בדיקה משפטית."
+    );
+  }
+
   if (hasAny(desc, ["התקנה", "הרכבה", "חיבור לרשת", "העברת קבצים"])) {
     add("מדובר בעבודת התקנה / תפעול טכנית, עם רכיבים כמו הרכבה, חיבור לרשת או העברת קבצים.");
   }
@@ -65,27 +110,60 @@ function buildObservations(req: RequestRecord): string[] {
     add("הפעילות נראית חד-פעמית, ולכן אין כרגע סימן להתקשרות מתמשכת.");
   }
   if (hasAny(desc, ["יועץ", "ייעוץ", "ליווי", "ריטיינר", "מתמשך"])) {
-    add("זוהה רכיב ייעוץ או ליווי מתמשך, ולכן כדאי לוודא אחריות מקצועית, תכולה ולוחות זמנים.");
+    add("זוהה רכיב ייעוץ או ליווי מתמשך — כדאי להגדיר תכולה, אחריות מקצועית ולוחות זמנים.");
   }
   if (hasAny(desc, ["הצעת מחיר", "הצעות מחיר"])) {
-    add("קיימת אינדיקציה להצעת מחיר, ולכן כדאי לצרף אותה או לוודא שהיא זמינה.");
+    add("יש אינדיקציה להצעת מחיר. כדאי לצרף אותה או לוודא שהיא זמינה.");
   }
   if (hasAny(desc, ["לא במאגר", "לא רשום", "ספק חדש", "מאגר 2026"])) {
-    add("יש סימן לכך שסטטוס הספק במאגר אינו מוסדר או אינו ודאי.");
+    add("סטטוס הספק במאגר אינו מוסדר או אינו ודאי. נדרש רישום במאגר 2026.");
   }
   if (supplier?.status === "not_registered") {
-    add("לפי נתוני הדמו, הספק אינו מופיע כמאושר במאגר. פתיחת ספק חדש מתבצעת דרך הקישור ליד שדה הספק בטופס הפנייה.");
+    add("לפי נתוני המאגר, הספק אינו מאושר. יש להפנותו לרישום ב-SAP.");
   }
-  if (hasAny(desc, ["ODT", "אודיטי", "חבלים", "ג'יפים", "ג׳יפים", "הסעות", "מלון", "קייטרינג"])) {
+  if (
+    hasAny(desc, [
+      "ODT",
+      "אודיטי",
+      "חבלים",
+      "ג'יפים",
+      "ג׳יפים",
+      "הסעות",
+      "מלון",
+      "קייטרינג",
+      "כיבוד",
+      "ארוחת",
+    ])
+  ) {
     add("זוהו רכיבי פעילות שיכולים להצריך בדיקת ביטוח, כמו פעילות שטח, הסעות, אירוח או מזון.");
   }
-  if (hasAny(desc, ["פרטיות", "מידע אישי", "תעודת זהות", "תעודות זהות", "טלפון", "אימייל", "רשימות משתתפים"])) {
+  if (
+    hasAny(desc, [
+      "פרטיות",
+      "מידע אישי",
+      "תעודת זהות",
+      "תעודות זהות",
+      "טלפון",
+      "אימייל",
+      "רשימות משתתפים",
+    ])
+  ) {
     add("זוהה שימוש אפשרי במידע אישי של משתתפים, ולכן נדרשת תשומת לב לפרטיות ואבטחת מידע.");
   }
   if (hasAny(desc, ["צילום", "נצלם", "מצלמים", "תיעוד מצולם", "סרטון"])) {
-    add("זוהה צילום או תיעוד משתתפים, ולכן כדאי לבדוק הסכמות ושימוש בתוצרים.");
+    add("זוהה צילום או תיעוד משתתפים — כדאי לבדוק הסכמות ושימוש בתוצרים.");
   }
-  if (hasAny(desc, ["שותפים", "מיזם משותף", "ג'וינט", "ג׳וינט", "משרד ממשלתי", "ביטוח לאומי"])) {
+  if (
+    hasAny(desc, [
+      "שותפים",
+      "מיזם משותף",
+      "ג'וינט",
+      "ג׳וינט",
+      "JDC",
+      "משרד ממשלתי",
+      "ביטוח לאומי",
+    ])
+  ) {
     add("זוהה רכיב של שותפות או גורם חיצוני נוסף, שיכול להשפיע על נוסח ההתקשרות.");
   }
   if (req.amount != null && req.amount >= 200000) {
@@ -95,18 +173,17 @@ function buildObservations(req: RequestRecord): string[] {
     add("צורפו מסמכים לפנייה. בשלב ה-POC הם נשמרים ונפתחים, אך התוכן שלהם עדיין לא מנותח אוטומטית.");
   }
   if (observations.length === 0) {
-    add("לא זוהו סימנים חריגים מעבר לפרטים שהוזנו. כדאי לוודא שהספק רשום ושיש מסמכי רכש מתאימים.");
+    add("לא זוהו סימנים חריגים מעבר לפרטים שהוזנו. ההצעה נראית נקייה ומתאימה לתנאי ההתקשרות הכלליים.");
   }
-
   return observations;
 }
 
 function buildMissing(req: RequestRecord): string[] {
   const missing: string[] = [];
-  if (!req.supplier_name) missing.push("שם ספק");
+  if (!req.supplier_name) missing.push("שם ספק / צד שני");
   if (req.amount == null) missing.push("סכום משוער");
   if (!extractSchedule(req.description)) missing.push("לוח זמנים / מועד ביצוע");
-  if (req.file_paths.length === 0) missing.push("מסמכים תומכים, אם קיימים");
+  if (req.file_paths.length === 0) missing.push("הצעת מחיר או מסמך תומך");
   return missing;
 }
 
@@ -117,18 +194,14 @@ function extractPurpose(desc: string): string {
 }
 
 function detectEngagementType(desc: string): string {
-  if (hasAny(desc, ["הארכת התקשרות", "המשך התקשרות", "חידוש הסכם", "הארכה"])) {
+  if (hasAny(desc, ["מענק", "תמיכה", "עמותה", "גוף נתמך"])) return "מסלול מענק";
+  if (hasAny(desc, ["הארכת התקשרות", "המשך התקשרות", "חידוש הסכם", "הארכה"]))
     return "המשך / הארכת התקשרות";
-  }
-  if (hasAny(desc, ["הסכם חדש", "התקשרות חדשה", "התקשרות ראשונה"])) {
+  if (hasAny(desc, ["הסכם חדש", "התקשרות חדשה", "התקשרות ראשונה"]))
     return "התקשרות חדשה";
-  }
-  if (hasAny(desc, ["חד-פעמית", "חד פעמית", "פעם אחת"])) {
-    return "עבודה חד-פעמית";
-  }
-  if (hasAny(desc, ["מתמשך", "ריטיינר", "ליווי"])) {
-    return "התקשרות מתמשכת";
-  }
+  if (hasAny(desc, ["חד-פעמית", "חד פעמית", "פעם אחת"])) return "עבודה חד-פעמית";
+  if (hasAny(desc, ["מתמשך", "ריטיינר", "ליווי"])) return "התקשרות מתמשכת";
+  if (hasAny(desc, ["שיתוף פעולה", "מיזם משותף"])) return "שיתוף פעולה / מיזם משותף";
   return "לא זוהה בבירור";
 }
 

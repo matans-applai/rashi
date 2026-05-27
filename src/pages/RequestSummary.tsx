@@ -11,7 +11,12 @@ import type { RequestRecord } from "../lib/types";
 import { OutcomeBadge, StatusBadge } from "../components/OutcomeBadge";
 import { classifyRequest } from "../lib/classifier";
 import { buildRequestUnderstanding } from "../lib/insights";
-import { SUPPLIER_REGISTRATION_URL } from "../lib/links";
+import {
+  SAP_SUPPLIER_REGISTRATION_URL,
+  RASHI_GENERAL_TERMS_DOC_URL,
+  GRANT_MASTER_DOC_URL,
+  buildSupplierRegistrationMessage,
+} from "../lib/links";
 
 export default function RequestSummary() {
   const { id } = useParams();
@@ -250,15 +255,17 @@ function RecommendationCard({ req }: { req: RequestRecord }) {
 function outcomeMessage(req: RequestRecord): string {
   switch (req.outcome) {
     case "missing_info":
-      return "חסר מידע בסיסי כדי להמליץ על המשך פעולה. מומלץ להוסיף תיאור קצר של מטרת ההתקשרות, ספק אם ידוע, סכום ומסמכים קיימים.";
+      return "חסר מידע בסיסי כדי להמליץ על המשך פעולה. אפשר להוסיף כמה משפטים על מטרת ההתקשרות, מי הצד השני, ומה הסכום המשוער — ואז להריץ שוב.";
     case "legal_review":
       return "לפי המידע שהוזן, נראה שהפנייה כוללת רכיב שמצריך בדיקה משפטית. מומלץ להשלים פרטים נוספים כדי לקדם את הטיפול, או לשלוח את הפנייה עם המידע שהוזן עד כה.";
+    case "grant":
+      return "לפי המידע שהוזן, נראה שהפנייה היא מסלול מענק — העברת כספים לעמותה / גוף נתמך לטובת פעילות שלהם. יש להשתמש במאסטר כתב התחייבות לקבלת מענק ולהשלים את חבילת המסמכים הנדרשת.";
     case "supplier_registration":
-      return "רשומת עבר: פתיחת ספק חדש מתבצעת כיום דרך הקישור ליד שדה הספק בטופס הפנייה.";
+      return "נראה שהספק אינו רשום במאגר 2026 או שסטטוס הרישום שלו אינו ברור. יש להשלים רישום ספק לפני המשך התקשרות. כחלק מהרישום הספק חותם על תנאי ההתקשרות הכלליים של הקרן.";
     case "insurance_required":
-      return "לפי תיאור הפעילות, נראה שנדרש אישור ביטוח מתאים לפני המשך התקשרות.";
+      return "לפי תיאור הפעילות, ניתן להתקדם במסלול תנאי ההתקשרות הכלליים בכפוף להשלמת אישור ביטוח מתאים לסוג השירות.";
     case "general_terms":
-      return "לפי המידע שהוזן, נראה שניתן להתקדם במסלול תנאי התקשרות רגילים. יש לוודא שהספק רשום במאגר ושאין תנאים חריגים נוספים.";
+      return "ניתן להתקדם על בסיס תנאי ההתקשרות הכלליים של קרן רש״י, בכפוף לכך שהספק במאגר, קיימת הצעת מחיר נקייה, ותונפק הזמנת רכש חתומה לפי נוהל הקרן.";
     default:
       return "—";
   }
@@ -298,32 +305,44 @@ function NextActions({
       </div>
     );
   }
-  if (o === "supplier_registration") {
+  if (o === "grant") {
     return (
       <div className="space-y-2">
         <a
           className="btn-primary w-full"
-          href={SUPPLIER_REGISTRATION_URL}
+          href={GRANT_MASTER_DOC_URL}
           target="_blank"
           rel="noreferrer"
         >
-          פתח קישור רישום ספק
+          פתח מאסטר כתב התחייבות למענק
         </a>
         <button
           className="btn-secondary w-full"
           onClick={() => nav(`/requests/${req.id}/legal`)}
         >
-          בכל זאת העבר לבדיקה משפטית
+          המשך לרשימת מסמכי מענק
         </button>
       </div>
     );
+  }
+  if (o === "supplier_registration") {
+    return <SupplierRegistrationActions req={req} />;
   }
   if (o === "insurance_required") {
     return (
       <div className="space-y-2">
         <div className="rounded-lg bg-amber-50 border border-amber-200 text-amber-900 p-3 text-sm">
-          יש לפנות לרפרנט הביטוח של הקרן לפני המשך התקשרות והעלאת אישור ביטוח מתאים.
+          ניתן להתקדם בתנאי ההתקשרות הכלליים, ובמקביל יש להשלים אישור ביטוח לפי סוג השירות
+          (פעילות שטח / הסעות / מזון / לינה / משתתפים).
         </div>
+        <a
+          className="btn-primary w-full"
+          href={RASHI_GENERAL_TERMS_DOC_URL}
+          target="_blank"
+          rel="noreferrer"
+        >
+          הצג תנאי התקשרות כלליים
+        </a>
         <button
           className="btn-secondary w-full"
           onClick={() => nav(`/requests/${req.id}/legal`)}
@@ -338,14 +357,70 @@ function NextActions({
     <div className="space-y-2">
       <a
         className="btn-primary w-full"
-        href="/files/rashi-supplier-selection-protocol.docx"
+        href={RASHI_GENERAL_TERMS_DOC_URL}
         target="_blank"
         rel="noreferrer"
       >
-        הורד פרוטוקול בחירת ספק
+        הצג תנאי התקשרות כלליים
       </a>
-      <p className="text-xs text-slate-400">
-        טופס רכש כללי מתוך מסמכי הקרן. לא נמצא בקבצים שצורפו טופס ביטוח ייעודי.
+      <p className="text-xs text-slate-500">
+        ספק במאגר + הצעת מחיר נקייה + הזמנת רכש חתומה לפי נוהל הקרן.
+      </p>
+      <button
+        className="btn-secondary w-full"
+        onClick={() => nav(`/requests/${req.id}/legal`)}
+      >
+        בכל זאת העבר לבדיקה משפטית
+      </button>
+    </div>
+  );
+}
+
+function SupplierRegistrationActions({ req }: { req: RequestRecord }) {
+  const nav = useNavigate();
+  const [showMessage, setShowMessage] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const message = buildSupplierRegistrationMessage(req.supplier_name);
+
+  async function copyMessage() {
+    try {
+      await navigator.clipboard.writeText(message);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      /* clipboard may be blocked — user can still copy manually */
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      <a
+        className="btn-primary w-full"
+        href={SAP_SUPPLIER_REGISTRATION_URL}
+        target="_blank"
+        rel="noreferrer"
+      >
+        פתח קישור רישום ספק (SAP)
+      </a>
+      <button
+        type="button"
+        className="btn-secondary w-full"
+        onClick={() => setShowMessage((s) => !s)}
+      >
+        {showMessage ? "הסתר הודעה לספק" : "צור הודעה לספק"}
+      </button>
+      {showMessage && (
+        <div className="rounded-lg bg-slate-50 border border-slate-200 p-3 space-y-2">
+          <pre className="whitespace-pre-wrap text-xs text-slate-700 font-sans">
+            {message}
+          </pre>
+          <button type="button" className="btn-ghost text-xs" onClick={copyMessage}>
+            {copied ? "✓ הועתק" : "העתק הודעה"}
+          </button>
+        </div>
+      )}
+      <p className="text-xs text-slate-500">
+        כחלק מהרישום הספק חותם על תנאי ההתקשרות הכלליים של הקרן.
       </p>
       <button
         className="btn-secondary w-full"

@@ -4,7 +4,33 @@ import Layout from "../components/Layout";
 import { getRequest, updateLegalIntake, uploadFiles } from "../lib/requests";
 import { useAuth } from "../lib/auth";
 import { buildLegalIntakePrefill, prefilledKeys } from "../lib/prefill";
-import type { LegalIntakePayload, RequestRecord } from "../lib/types";
+import type {
+  AgreementTypeEstimate,
+  GrantDocuments,
+  LegalIntakePayload,
+  RequestRecord,
+} from "../lib/types";
+
+const AGREEMENT_TYPE_OPTIONS: { v: AgreementTypeEstimate | ""; l: string }[] = [
+  { v: "", l: "בחר..." },
+  { v: "service_purchase", l: "רכישת שירות / מוצר" },
+  { v: "cooperation", l: "שיתוף פעולה" },
+  { v: "government_joint", l: "מיזם משותף עם גוף ציבורי / ממשלתי" },
+  { v: "grant", l: "מענק / תמיכה" },
+  { v: "sponsorship", l: "חסות / תרומה" },
+  { v: "other", l: "אחר / לא ברור" },
+];
+
+const GRANT_DOC_LABELS: Record<keyof GrantDocuments, string> = {
+  ceoApproval: 'אישור חתום של מנכ"ל / מנהל כללי על המענק',
+  grantRequest: "בקשה למענק מהעמותה",
+  grantForm: "טופס מענק ממולא",
+  bylaws: "תקנון העמותה",
+  managementApproval: "אישור ניהול תקין בתוקף",
+  section46: 'אישור סעיף 46 (אם רלוונטי)',
+  withholdingTax: "אישור ניכוי מס במקור",
+  cpaApproval: 'אישור רו"ח (לסכומים מעל 50,000 ₪)',
+};
 
 export default function LegalIntake() {
   const { id } = useParams();
@@ -92,6 +118,12 @@ export default function LegalIntake() {
             full
           />
           <Select
+            label="סוג ההתקשרות (הערכה)"
+            value={data.agreementTypeEstimate ?? ""}
+            onChange={(v) => set("agreementTypeEstimate", v as any)}
+            options={AGREEMENT_TYPE_OPTIONS}
+          />
+          <Select
             label="האם מדובר בהסכם חדש או המשך"
             value={data.agreementType ?? ""}
             onChange={(v) => set("agreementType", v as any)}
@@ -100,6 +132,13 @@ export default function LegalIntake() {
               { v: "new", l: "חדש" },
               { v: "extension", l: "המשך / הארכה" },
             ]}
+          />
+          <Textarea
+            label="תפקיד כל צד (מה כל אחד נותן ומקבל)"
+            value={data.partyRoles ?? ""}
+            onChange={(v) => set("partyRoles", v)}
+            placeholder="לדוגמה: קרן רש״י מזמינה שירות מ-Y תמורת תשלום של 50,000 ₪"
+            full
           />
           <Input
             label="שם הצד השני"
@@ -129,7 +168,7 @@ export default function LegalIntake() {
 
       {/* Card 2 */}
       <section className="card mb-5">
-        <h2 className="font-semibold mb-4">בחירת ספק ומסמכים</h2>
+        <h2 className="font-semibold mb-4">ספק, הצעה ומסמכים</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <YesNo
             label="האם הספק כבר נבחר?"
@@ -151,6 +190,31 @@ export default function LegalIntake() {
             value={data.hasQuote ?? ""}
             onChange={(v) => set("hasQuote", v)}
           />
+          <Select
+            label="ניקיון ההצעה"
+            value={data.quoteCleanliness ?? ""}
+            onChange={(v) => set("quoteCleanliness", v as any)}
+            options={[
+              { v: "", l: "לא ידוע" },
+              { v: "clean", l: "נקייה (תכולה / סכום / לו״ז בלבד)" },
+              { v: "supplier_terms", l: "כוללת תנאי ספק (תשלום / ביטול / IP / סודיות)" },
+            ]}
+          />
+          <YesNo
+            label="האם תידרש הזמנת רכש חתומה?"
+            value={data.purchaseOrderNeeded ?? ""}
+            onChange={(v) => set("purchaseOrderNeeded", v)}
+          />
+          {(data.supplierTermsDetected ?? []).length > 0 && (
+            <div className="sm:col-span-2 rounded-xl bg-red-50 border border-red-200 text-red-900 p-3 text-sm">
+              <div className="font-medium mb-1">תנאי ספק שזוהו בתיאור / הצעה:</div>
+              <ul className="list-disc pr-5 space-y-0.5">
+                {(data.supplierTermsDetected ?? []).map((t) => (
+                  <li key={t}>{t}</li>
+                ))}
+              </ul>
+            </div>
+          )}
           <div className="sm:col-span-2">
             <label className="label">העלאת מסמכים נוספים</label>
             <input
@@ -169,6 +233,33 @@ export default function LegalIntake() {
           </div>
         </div>
       </section>
+
+      {/* Grant card — shown if the route is grant or the description hints grant */}
+      {(req.outcome === "grant" || data.isGrant) && (
+        <section className="card mb-5">
+          <h2 className="font-semibold mb-4">מסמכי מענק</h2>
+          <p className="text-sm text-slate-500 mb-3">
+            סמן את המסמכים שכבר ברשותך. החסרים יסומנו בסיכום הסופי.
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {(Object.keys(GRANT_DOC_LABELS) as (keyof GrantDocuments)[]).map(
+              (key) => (
+                <YesNo
+                  key={key}
+                  label={GRANT_DOC_LABELS[key]}
+                  value={(data.grantDocuments?.[key] ?? "") as string}
+                  onChange={(v) =>
+                    set("grantDocuments", {
+                      ...(data.grantDocuments ?? {}),
+                      [key]: v,
+                    })
+                  }
+                />
+              )
+            )}
+          </div>
+        </section>
+      )}
 
       {/* Card 3 */}
       <section className="card mb-5">

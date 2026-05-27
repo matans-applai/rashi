@@ -1,7 +1,8 @@
 export type RoutingOutcome =
   | "missing_info"
   | "legal_review"
-  | "supplier_registration" // Legacy records only; new supplier setup is a link, not a route.
+  | "grant"
+  | "supplier_registration"
   | "insurance_required"
   | "general_terms";
 
@@ -10,6 +11,28 @@ export type RequestStatus =
   | "classified"
   | "sent_to_legal"
   | "completed";
+
+/**
+ * High-level inferred engagement type. Used by the classifier and surfaced in
+ * the request summary + legal intake.
+ */
+export type AgreementTypeEstimate =
+  | "service_purchase"
+  | "cooperation"
+  | "government_joint"
+  | "grant"
+  | "sponsorship"
+  | "other";
+
+/**
+ * Whether the quote / supplier description contains terms beyond price /
+ * scope / timeline (which would push the case toward legal review).
+ *
+ *  "clean"                 — only price, scope, timeline.
+ *  "supplier_terms"        — payment terms, IP, liability, privacy, etc.
+ *  "unknown"               — not enough info.
+ */
+export type QuoteCleanliness = "clean" | "supplier_terms" | "unknown";
 
 export interface ClassificationInput {
   department: string;
@@ -25,7 +48,28 @@ export interface ClassificationResult {
   reasoning: string;
   tags: string[];
   matchedKeywords: string[];
+
+  /** Supplier registry status if we recognized the supplier name. */
   supplierStatus?: "registered" | "not_registered" | "unknown";
+
+  /** What kind of engagement does this look like overall? */
+  agreementTypeEstimate?: AgreementTypeEstimate;
+
+  /** Was the quote / description "clean" or did it include supplier terms? */
+  quoteCleanliness?: QuoteCleanliness;
+
+  /** Specific supplier-terms triggers found in text (IP, liability, ...). */
+  supplierTermsTriggers?: string[];
+
+  /** Grant-related triggers found in text. */
+  grantTriggers?: string[];
+
+  /** Whether the classifier sees this as a grant scenario overall. */
+  isGrant?: boolean;
+
+  /** Up to N short questions to ask the user to improve confidence. */
+  clarifyingQuestions?: string[];
+
   nextActions: { label: string; href?: string; kind: "primary" | "secondary" }[];
 }
 
@@ -46,26 +90,60 @@ export interface RequestRecord {
   created_at: string;
 }
 
+/**
+ * Grant required documents — each is yes/no/missing.
+ * Stored inside legal_intake.grantDocuments so we don't need a DB migration.
+ */
+export interface GrantDocuments {
+  ceoApproval?: "yes" | "no" | "";       // אישור חתום של מנכ"ל / מנהל כללי
+  grantRequest?: "yes" | "no" | "";      // בקשת מענק
+  grantForm?: "yes" | "no" | "";         // טופס מענק ממולא
+  bylaws?: "yes" | "no" | "";            // תקנון העמותה
+  managementApproval?: "yes" | "no" | ""; // אישור ניהול תקין
+  section46?: "yes" | "no" | "";         // אישור 46
+  withholdingTax?: "yes" | "no" | "";    // ניכוי מס במקור
+  cpaApproval?: "yes" | "no" | "";       // אישור רו"ח (אם > 50K)
+}
+
 export interface LegalIntakePayload {
-  // Card 1
+  // ---- Card 1 — engagement details ----
   purpose?: string;
   agreementType?: "new" | "extension" | "";
+  /** Free-text estimate / category of engagement (service / cooperation / grant ...). */
+  agreementTypeEstimate?: AgreementTypeEstimate | "";
+  /** Who is giving what to whom. Free-text, optional. */
+  partyRoles?: string;
   counterparty?: string;
   amount?: string;
   schedule?: string;
   budgetLine?: string;
-  // Card 2
+
+  // ---- Card 2 — supplier & docs ----
   supplierSelected?: "yes" | "no" | "";
   competitiveProcess?: "yes" | "no" | "";
   singleSupplier?: "yes" | "no" | "";
   hasQuote?: "yes" | "no" | "";
-  // Card 3
+  /** "clean" quote vs "supplier_terms" detected. */
+  quoteCleanliness?: QuoteCleanliness | "";
+  /** Detected supplier-terms triggers as Hebrew bullets. */
+  supplierTermsDetected?: string[];
+  /** Should a signed PO be issued by Rashi? */
+  purchaseOrderNeeded?: "yes" | "no" | "";
+
+  // ---- Card 3 — risks & exceptions ----
   partners?: "yes" | "no" | "";
   privacy?: "yes" | "no" | "";
   copyright?: "yes" | "no" | "";
   filmingParticipants?: "yes" | "no" | "";
   insuranceNeeded?: "yes" | "no" | "";
   subcontractors?: "yes" | "no" | "";
+
+  // ---- Grant route ----
+  isGrant?: boolean;
+  grantDocuments?: GrantDocuments;
+  grantMissingDocuments?: string[];
+
+  // ---- General ----
   notes?: string;
   extraFilePaths?: string[];
 }

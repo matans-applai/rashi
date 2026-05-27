@@ -1,11 +1,12 @@
 import type { RoutingOutcome, RequestStatus } from "../lib/types";
 
 const OUTCOME_LABEL: Record<RoutingOutcome, string> = {
-  general_terms: "תנאי התקשרות רגילים",
-  supplier_registration: "רישום ספק (ישן)",
-  insurance_required: "נדרש אישור ביטוח",
+  general_terms: "תנאי התקשרות כלליים / ספק במאגר",
+  supplier_registration: "רישום ספק במאגר",
+  insurance_required: "תנאי התקשרות + השלמת אישור ביטוח",
   legal_review: "בדיקה משפטית",
-  missing_info: "חסר מידע",
+  grant: "מסלול מענק",
+  missing_info: "חסר מידע לקבלת החלטה",
 };
 
 const OUTCOME_CLASS: Record<RoutingOutcome, string> = {
@@ -13,7 +14,8 @@ const OUTCOME_CLASS: Record<RoutingOutcome, string> = {
   supplier_registration: "tag-violet",
   insurance_required: "tag-amber",
   legal_review: "tag-red",
-  missing_info: "tag-blue",
+  grant: "tag-blue",
+  missing_info: "tag",
 };
 
 export function OutcomeBadge({ outcome }: { outcome: RoutingOutcome | null }) {
