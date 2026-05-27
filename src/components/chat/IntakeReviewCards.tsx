@@ -6,6 +6,8 @@ import type {
   SecondPartyType,
   YesNoUnknown,
 } from "../../lib/aiTypes";
+import type { RequestFile } from "../../lib/types";
+import { fileSignedUrl } from "../../lib/requests";
 
 const YN_OPTIONS = [
   { value: "yes", label: "כן" },
@@ -38,13 +40,15 @@ interface Props {
   onChange: (next: IntakeSummary) => void;
   /** Optional list of missing items to surface in card 9. */
   missing?: string[];
+  /** Uploaded files linked to this request. */
+  files?: RequestFile[];
 }
 
 /**
  * The 10 editable review cards. The user can edit any field with the inline
  * pencil. `onChange` fires every time a field is saved.
  */
-export default function IntakeReviewCards({ intake, onChange, missing }: Props) {
+export default function IntakeReviewCards({ intake, onChange, missing, files }: Props) {
   const set = <K extends keyof IntakeSummary>(key: K, value: IntakeSummary[K]) =>
     onChange({ ...intake, [key]: value });
 
@@ -171,9 +175,9 @@ export default function IntakeReviewCards({ intake, onChange, missing }: Props) 
         </Grid>
       </Card>
 
-      <Card title="6. מסמכים קיימים">
+      <Card title="6. מסמכים שצורפו או הוזכרו">
         <EditableField
-          label="מסמכים שצורפו או הוזכרו"
+          label="מסמכים שהוזכרו בשיחה"
           mode="list"
           value={intake.documents_mentioned}
           onChange={(v) =>
@@ -181,6 +185,16 @@ export default function IntakeReviewCards({ intake, onChange, missing }: Props) 
           }
           placeholder="הקלידו פריט אחד בכל שורה"
         />
+        {files && files.length > 0 && (
+          <div className="mt-4">
+            <div className="text-xs text-slate-500 mb-1">קבצים שהועלו</div>
+            <ul className="space-y-1">
+              {files.map((f) => (
+                <FileRow key={f.id} file={f} />
+              ))}
+            </ul>
+          </div>
+        )}
       </Card>
 
       <Card title="7. תהליך בחירת ספק / צד שני">
@@ -313,5 +327,29 @@ function Grid({ children }: { children: React.ReactNode }) {
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
       {children}
     </div>
+  );
+}
+
+function FileRow({ file }: { file: RequestFile }) {
+  async function handleClick() {
+    const url = await fileSignedUrl(file.storage_path);
+    if (url) window.open(url, "_blank");
+  }
+  const size = file.file_size != null
+    ? file.file_size < 1024 * 1024
+      ? `${(file.file_size / 1024).toFixed(0)} KB`
+      : `${(file.file_size / (1024 * 1024)).toFixed(1)} MB`
+    : "";
+  return (
+    <li className="flex items-center gap-2 text-xs text-slate-700 bg-slate-50 rounded-lg px-2 py-1.5">
+      <button
+        type="button"
+        onClick={handleClick}
+        className="truncate flex-1 text-right text-brand-600 hover:underline"
+      >
+        {file.file_name}
+      </button>
+      <span className="text-slate-400 shrink-0">{size}</span>
+    </li>
   );
 }

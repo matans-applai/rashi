@@ -8,15 +8,16 @@ import AiThinkingState from "../components/chat/AiThinkingState";
 import KnownInfoCard from "../components/chat/KnownInfoCard";
 import MissingInfoQuestions from "../components/chat/MissingInfoQuestions";
 import AIErrorPanel from "../components/chat/AIErrorPanel";
+import FileUpload from "../components/chat/FileUpload";
 import { useAuth } from "../lib/auth";
 import { callIntake, AIError } from "../lib/aiClient";
-import { createIntakeRequest, updateIntake } from "../lib/requests";
+import { createIntakeRequest, updateIntake, linkFilesToRequest } from "../lib/requests";
 import type {
   ChatMessage,
   IntakeResponse,
   IntakeStep,
 } from "../lib/aiTypes";
-import type { RequestRecord } from "../lib/types";
+import type { RequestRecord, RequestFile } from "../lib/types";
 
 const HERO_CHIPS = [
   { label: "יש לי ספק / יועץ", value: "אנחנו רוצים להתקשר עם " },
@@ -26,13 +27,6 @@ const HERO_CHIPS = [
   { label: "לא בטוח מה צריך", value: "אני לא בטוח/ה איזה סוג הסכם צריך — " },
 ];
 
-/**
- * Chat-first legal-intake assistant.
- *
- * The user describes the request freely. The AI extracts structured intake
- * info and asks short follow-ups. When the user is done (or the AI says
- * ready_for_final_summary), we persist and navigate to the editable review.
- */
 export default function NewRequest() {
   const { user } = useAuth();
   const nav = useNavigate();
@@ -45,6 +39,7 @@ export default function NewRequest() {
   const [persisting, setPersisting] = useState(false);
   const [recordId, setRecordId] = useState<string | null>(null);
   const [lastUserMessage, setLastUserMessage] = useState<string | null>(null);
+  const [uploadedFiles, setUploadedFiles] = useState<RequestFile[]>([]);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -77,7 +72,6 @@ export default function NewRequest() {
       setMessages(withAssistant);
       setIntake(result);
 
-      // Persist progressively so the user can leave and come back.
       let record: RequestRecord | null = null;
       if (!recordId && user) {
         const description = newMessages.find((m) => m.role === "user")?.content ?? text;
@@ -89,6 +83,17 @@ export default function NewRequest() {
           intake: result,
         });
         setRecordId(record.id);
+        // Link any files uploaded before the record existed.
+        const unlinked = uploadedFiles.filter((f) => !f.request_id);
+        if (unlinked.length > 0) {
+          await linkFilesToRequest(
+            unlinked.map((f) => f.id),
+            record.id
+          );
+          setUploadedFiles((prev) =>
+            prev.map((f) => (f.request_id ? f : { ...f, request_id: record!.id }))
+          );
+        }
       } else if (recordId) {
         await updateIntake({
           id: recordId,
@@ -116,18 +121,15 @@ export default function NewRequest() {
 
   function retryLastTurn() {
     if (lastUserMessage) {
-      // Remove the last user message from history and resend.
       setMessages((m) => m.slice(0, -1));
       sendTurn(lastUserMessage);
     }
   }
 
   async function continueManually() {
-    // If the AI is broken, save what we have and let the user edit manually.
     if (!user) return;
     setPersisting(true);
     try {
-      // Create a stub record with no intake_summary if none exists yet.
       if (!recordId) {
         const description = messages.find((m) => m.role === "user")?.content ?? "";
         const fakeIntake = makeEmptyIntake(description);
@@ -139,6 +141,13 @@ export default function NewRequest() {
           intake: fakeIntake,
         });
         setRecordId(record.id);
+        const unlinked = uploadedFiles.filter((f) => !f.request_id);
+        if (unlinked.length > 0) {
+          await linkFilesToRequest(
+            unlinked.map((f) => f.id),
+            record.id
+          );
+        }
         nav(`/requests/${record.id}`);
       } else {
         nav(`/requests/${recordId}`);
@@ -148,14 +157,19 @@ export default function NewRequest() {
     }
   }
 
-  // -------- Render --------
   return (
     <Layout>
       <div className="max-w-3xl mx-auto">
         <StepIndicator current={step === "describe" ? "describe" : "chat"} />
 
         {step === "describe" && messages.length === 0 ? (
-          <HeroDescribe onSend={sendTurn} disabled={thinking} />
+          <HeroDescribe
+            onSend={sendTurn}
+            disabled={thinking}
+            userId={user?.id ?? ""}
+            uploadedFiles={uploadedFiles}
+            onFilesChange={setUploadedFiles}
+          />
         ) : (
           <div className="space-y-4">
             <div
@@ -191,6 +205,14 @@ export default function NewRequest() {
                   busy={thinking}
                   disabled={thinking}
                 />
+                {user && (
+                  <FileUpload
+                    userId={user.id}
+                    requestId={recordId}
+                    files={uploadedFiles}
+                    onFilesChange={setUploadedFiles}
+                  />
+                )}
                 <div className="flex items-center gap-3 justify-end pt-2 flex-wrap">
                   <button
                     type="button"
@@ -220,9 +242,15 @@ export default function NewRequest() {
 function HeroDescribe({
   onSend,
   disabled,
+  userId,
+  uploadedFiles,
+  onFilesChange,
 }: {
   onSend: (t: string) => void;
   disabled?: boolean;
+  userId: string;
+  uploadedFiles: RequestFile[];
+  onFilesChange: (files: RequestFile[]) => void;
 }) {
   return (
     <div className="text-center pt-8">
@@ -234,7 +262,7 @@ function HeroDescribe({
         הפנייה, סכום משוער, לוחות זמנים, מסמכים קיימים ומה כל צד אמור לתת או
         לקבל.
       </p>
-      <div className="max-w-2xl mx-auto">
+      <div className="max-w-2xl mx-auto space-y-3">
         <ChatInput
           size="hero"
           placeholder="כתבו כאן את פרטי הפנייה…"
@@ -242,13 +270,19 @@ function HeroDescribe({
           chips={HERO_CHIPS}
           disabled={disabled}
         />
+        {userId && (
+          <FileUpload
+            userId={userId}
+            requestId={null}
+            files={uploadedFiles}
+            onFilesChange={onFilesChange}
+          />
+        )}
       </div>
     </div>
   );
 }
 
-/** Build an empty intake response — used when the AI fails and the user
- *  wants to proceed manually. The review screen lets them edit everything. */
 function makeEmptyIntake(description: string): IntakeResponse {
   return {
     intake_summary: {

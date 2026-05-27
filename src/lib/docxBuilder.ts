@@ -43,6 +43,7 @@ interface BuildContext {
   intake: IntakeSummary;
   requesterName: string;
   requesterEmail: string;
+  uploadedFileNames?: string[];
 }
 
 /**
@@ -147,10 +148,14 @@ function buildDocument(ctx: BuildContext): Document {
 
   // 6. מסמכים שצורפו או הוזכרו
   pushHeading(children, "6. מסמכים שצורפו או הוזכרו");
-  if (intake.documents_mentioned.length === 0) {
+  if (intake.documents_mentioned.length === 0 && (!ctx.uploadedFileNames || ctx.uploadedFileNames.length === 0)) {
     pushParagraph(children, "—");
   } else {
     for (const d of intake.documents_mentioned) pushBullet(children, d);
+    if (ctx.uploadedFileNames && ctx.uploadedFileNames.length > 0) {
+      pushParagraph(children, "קבצים שהועלו:");
+      for (const name of ctx.uploadedFileNames) pushBullet(children, name);
+    }
   }
   children.push(emptyLine());
 

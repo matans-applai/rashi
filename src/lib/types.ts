@@ -112,6 +112,17 @@ export interface GrantDocuments {
   cpaApproval?: "yes" | "no" | "";       // אישור רו"ח (אם > 50K)
 }
 
+export interface RequestFile {
+  id: string;
+  request_id: string | null;
+  user_id: string;
+  file_name: string;
+  storage_path: string;
+  file_type: string | null;
+  file_size: number | null;
+  uploaded_at: string;
+}
+
 export interface LegalIntakePayload {
   // ---- Card 1 — engagement details ----
   purpose?: string;

@@ -9,7 +9,7 @@ export default function KnownInfoCard({ intake }: { intake: IntakeResponse }) {
   const items = intake.known_information_he;
   if (!items || items.length === 0) {
     return (
-      <div className="card">
+      <div dir="rtl" className="card text-right">
         <h3 className="font-semibold mb-2">מה כבר ידוע</h3>
         <p className="text-sm text-slate-500">
           טרם נאסף מידע מובנה. אפשר להמשיך לתאר את הפנייה או לענות על שאלות
@@ -19,7 +19,7 @@ export default function KnownInfoCard({ intake }: { intake: IntakeResponse }) {
     );
   }
   return (
-    <div className="card">
+    <div dir="rtl" className="card text-right">
       <h3 className="font-semibold mb-3">מה כבר ידוע</h3>
       <ul className="space-y-1.5 text-sm text-slate-700">
         {items.map((it, i) => (

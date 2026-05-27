@@ -5,7 +5,7 @@ export default function MissingInfoQuestions({
 }) {
   if (!questions || questions.length === 0) return null;
   return (
-    <div className="rounded-2xl bg-amber-50 border border-amber-200 p-4 text-sm">
+    <div dir="rtl" className="rounded-2xl bg-amber-50 border border-amber-200 p-4 text-sm text-right">
       <div className="font-semibold text-amber-900 mb-2">שאלות השלמה</div>
       <ol className="space-y-1.5 list-none pr-1">
         {questions.map((q, i) => (
@@ -15,9 +15,6 @@ export default function MissingInfoQuestions({
           </li>
         ))}
       </ol>
-      <div className="text-xs text-amber-800 mt-3">
-        אפשר לענות חופשי בתיבה למטה — גם תשובה חלקית מספיקה.
-      </div>
     </div>
   );
 }

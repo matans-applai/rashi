@@ -1,17 +1,17 @@
 import type { ChatMessage } from "../../lib/aiTypes";
 
 export default function ChatBubble({ message }: { message: ChatMessage }) {
-  if (message.role === "system") return null; // never shown
+  if (message.role === "system") return null;
   const isUser = message.role === "user";
   return (
-    <div className={`flex ${isUser ? "justify-end" : "justify-start"} w-full`}>
+    <div className={`flex ${isUser ? "justify-start" : "justify-end"} w-full`}>
       <div
         dir="rtl"
         className={
           "max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-sm text-right " +
           (isUser
-            ? "bg-brand-600 text-white rounded-bl-md"
-            : "bg-white border border-slate-200 text-slate-800 rounded-br-md")
+            ? "bg-brand-600 text-white rounded-br-md"
+            : "bg-white border border-slate-200 text-slate-800 rounded-bl-md")
         }
       >
         {message.content.split("\n").map((line, i) => (

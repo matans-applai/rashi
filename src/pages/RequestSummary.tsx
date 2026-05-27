@@ -9,10 +9,12 @@ import {
   markReadyForLegal,
   markSentToLegal,
   saveEditedIntake,
+  listRequestFiles,
+  fileSignedUrl,
 } from "../lib/requests";
 import { downloadLegalReviewDocx } from "../lib/docxBuilder";
 import { useAuth, getUserDisplayName } from "../lib/auth";
-import type { RequestRecord } from "../lib/types";
+import type { RequestRecord, RequestFile } from "../lib/types";
 import type { IntakeResponse, IntakeSummary } from "../lib/aiTypes";
 
 /**
@@ -32,6 +34,7 @@ export default function RequestSummary() {
   const [error, setError] = useState<string | null>(null);
   const [savingField, setSavingField] = useState(false);
   const [action, setAction] = useState<"ready" | "send" | "download" | null>(null);
+  const [files, setFiles] = useState<RequestFile[]>([]);
 
   useEffect(() => {
     if (!id) return;
@@ -46,7 +49,9 @@ export default function RequestSummary() {
           (r.legal_case as IntakeSummary | null) ??
           ((r.llm_output as IntakeResponse | null)?.intake_summary ?? null);
         setIntake(stored);
+        return listRequestFiles(id);
       })
+      .then((f) => { if (f) setFiles(f); })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }, [id]);
@@ -118,6 +123,7 @@ export default function RequestSummary() {
         intake,
         requesterName: getUserDisplayName(user),
         requesterEmail: user?.email ?? "",
+        uploadedFileNames: files.map((f) => f.file_name),
       });
     } catch (e: any) {
       setError(e?.message ?? "שגיאה ביצירת מסמך");
@@ -163,6 +169,7 @@ export default function RequestSummary() {
             intake={intake}
             onChange={handleIntakeChange}
             missing={missing}
+            files={files}
           />
         ) : (
           <div className="card text-slate-500">

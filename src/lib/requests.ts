@@ -1,6 +1,7 @@
 import { supabase, REQUESTS_TABLE, FILES_BUCKET } from "./supabase";
 import type {
   RequestRecord,
+  RequestFile,
   LegalIntakePayload,
   RequestStatus,
 } from "./types";
@@ -207,6 +208,97 @@ export async function deleteRequest(req: RequestRecord): Promise<void> {
     .from(REQUESTS_TABLE)
     .delete()
     .eq("id", req.id);
+  if (error) throw error;
+}
+
+// ---------------------------------------------------------------------------
+// File metadata (request_files table)
+// ---------------------------------------------------------------------------
+
+const FILES_TABLE = "request_files";
+
+const ACCEPTED_TYPES = [
+  "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "image/png",
+  "image/jpeg",
+];
+
+export function isAcceptedFileType(file: File): boolean {
+  return ACCEPTED_TYPES.includes(file.type);
+}
+
+export const ACCEPTED_EXTENSIONS = ".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg";
+
+export async function uploadFileWithMetadata(args: {
+  userId: string;
+  requestId: string | null;
+  file: File;
+}): Promise<RequestFile> {
+  const safeName = args.file.name.replace(/[^\w.\-א-ת ]/g, "_");
+  const folder = args.requestId ?? "unlinked";
+  const storagePath = `${args.userId}/${folder}/${Date.now()}-${safeName}`;
+
+  const { error: uploadErr } = await supabase.storage
+    .from(FILES_BUCKET)
+    .upload(storagePath, args.file, { upsert: false });
+  if (uploadErr) throw uploadErr;
+
+  const { data, error: insertErr } = await supabase
+    .from(FILES_TABLE)
+    .insert({
+      request_id: args.requestId,
+      user_id: args.userId,
+      file_name: args.file.name,
+      storage_path: storagePath,
+      file_type: args.file.type || null,
+      file_size: args.file.size,
+    })
+    .select("*")
+    .single();
+  if (insertErr) throw insertErr;
+  return data as RequestFile;
+}
+
+export async function listRequestFiles(requestId: string): Promise<RequestFile[]> {
+  const { data, error } = await supabase
+    .from(FILES_TABLE)
+    .select("*")
+    .eq("request_id", requestId)
+    .order("uploaded_at", { ascending: true });
+  if (error) throw error;
+  return (data ?? []) as RequestFile[];
+}
+
+export async function listUserUnlinkedFiles(userId: string): Promise<RequestFile[]> {
+  const { data, error } = await supabase
+    .from(FILES_TABLE)
+    .select("*")
+    .eq("user_id", userId)
+    .is("request_id", null)
+    .order("uploaded_at", { ascending: true });
+  if (error) throw error;
+  return (data ?? []) as RequestFile[];
+}
+
+export async function linkFilesToRequest(
+  fileIds: string[],
+  requestId: string
+): Promise<void> {
+  if (fileIds.length === 0) return;
+  const { error } = await supabase
+    .from(FILES_TABLE)
+    .update({ request_id: requestId })
+    .in("id", fileIds);
+  if (error) throw error;
+}
+
+export async function deleteFileWithMetadata(file: RequestFile): Promise<void> {
+  await supabase.storage.from(FILES_BUCKET).remove([file.storage_path]);
+  const { error } = await supabase.from(FILES_TABLE).delete().eq("id", file.id);
   if (error) throw error;
 }
 

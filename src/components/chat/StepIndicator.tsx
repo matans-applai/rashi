@@ -4,7 +4,7 @@ const STEPS: { id: IntakeStep; label: string }[] = [
   { id: "describe", label: "תיאור הפנייה" },
   { id: "chat", label: "השלמת מידע" },
   { id: "review", label: "סיכום ועריכה" },
-  { id: "ready", label: "מוכן למשפטית" },
+  { id: "ready", label: "הכנה לשליחה" },
 ];
 
 /**
