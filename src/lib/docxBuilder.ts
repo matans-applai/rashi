@@ -9,36 +9,26 @@ import {
 } from "docx";
 import { saveAs } from "file-saver";
 import type {
-  AgreementTypeEstimate,
-  GrantDocuments,
-  LegalIntakePayload,
-  RequestRecord,
-} from "./types";
+  AgreementTypeEstimateLLM,
+  LegalCase,
+  YesNoUnknown,
+} from "./aiTypes";
+import type { RequestRecord } from "./types";
 import { OUTCOME_LABEL } from "../components/OutcomeBadge";
-import { lookupSupplier } from "./suppliers";
 
-const AGREEMENT_TYPE_LABEL: Record<AgreementTypeEstimate, string> = {
+const AGREEMENT_LABEL: Record<AgreementTypeEstimateLLM, string> = {
   service_purchase: "רכישת שירות / מוצר",
   cooperation: "שיתוף פעולה",
-  government_joint: "מיזם משותף עם גוף ציבורי / ממשלתי",
+  government_joint_venture: "מיזם משותף עם גוף ציבורי / ממשלתי",
   grant: "מענק / תמיכה",
   sponsorship: "חסות / תרומה",
-  other: "אחר / לא ברור",
-};
-
-const GRANT_DOC_LABELS: Record<keyof GrantDocuments, string> = {
-  ceoApproval: 'אישור חתום של מנכ"ל / מנהל כללי על המענק',
-  grantRequest: "בקשה למענק מהעמותה",
-  grantForm: "טופס מענק ממולא",
-  bylaws: "תקנון העמותה",
-  managementApproval: "אישור ניהול תקין בתוקף",
-  section46: "אישור סעיף 46 (אם רלוונטי)",
-  withholdingTax: "אישור ניכוי מס במקור",
-  cpaApproval: 'אישור רו"ח (לסכומים מעל 50,000 ₪)',
+  other: "אחר",
+  unclear: "לא ברור — נדרשת ולידציה משפטית",
 };
 
 interface BuildContext {
   req: RequestRecord;
+  legal: LegalCase;
   requesterName: string;
   requesterEmail: string;
 }
@@ -50,16 +40,18 @@ interface BuildContext {
 export async function downloadLegalReviewDocx(ctx: BuildContext): Promise<void> {
   const doc = buildDocument(ctx);
   const blob = await Packer.toBlob(doc);
-  const supplier = ctx.req.supplier_name?.replace(/[^\w֐-׿ -]+/g, "_") || "פנייה";
+  const supplier =
+    (ctx.legal.second_party || ctx.req.supplier_name || "פנייה").replace(
+      /[^\w֐-׿ -]+/g,
+      "_"
+    );
   const date = new Date().toISOString().slice(0, 10);
   saveAs(blob, `פנייה_משפטית_${supplier}_${date}.docx`);
 }
 
 function buildDocument(ctx: BuildContext): Document {
-  const { req } = ctx;
-  const li = req.legal_intake ?? {};
+  const { req, legal } = ctx;
   const dateStr = new Date().toLocaleDateString("he-IL");
-  const supplier = lookupSupplier(req.supplier_name ?? "");
 
   const children: Paragraph[] = [];
 
@@ -69,7 +61,14 @@ function buildDocument(ctx: BuildContext): Document {
       alignment: AlignmentType.CENTER,
       bidirectional: true,
       heading: HeadingLevel.TITLE,
-      children: [new TextRun({ text: "פנייה לבדיקה משפטית", bold: true, rightToLeft: true, size: 40 })],
+      children: [
+        new TextRun({
+          text: "פנייה לבדיקה משפטית",
+          bold: true,
+          rightToLeft: true,
+          size: 40,
+        }),
+      ],
     })
   );
   children.push(
@@ -87,134 +86,83 @@ function buildDocument(ctx: BuildContext): Document {
   );
   children.push(emptyLine());
 
-  // Section 1 — פרטי הפנייה
+  // 1. פרטי הפנייה
   pushHeading(children, "1. פרטי הפנייה");
-  pushKV(children, "מחלקה / מיזם", req.department || "—");
+  pushKV(children, "מחלקה / מיזם", legal.department_or_project || req.department || "—");
   pushKV(children, "שם הפונה", ctx.requesterName || "—");
   pushKV(children, "אימייל הפונה", ctx.requesterEmail || "—");
   pushKV(children, "תאריך הכנת הפנייה", dateStr);
   children.push(emptyLine());
 
-  // Section 2 — מטרת ההתקשרות
+  // 2. מטרת ההתקשרות
   pushHeading(children, "2. מטרת ההתקשרות");
-  pushParagraph(children, li.purpose || req.description || "—");
-  if (li.partyRoles) {
-    pushKV(children, "תפקיד כל צד", li.partyRoles);
+  pushParagraph(children, legal.purpose || req.description || "—");
+  if (legal.party_roles) {
+    pushKV(children, "תפקיד כל צד", legal.party_roles);
   }
   children.push(emptyLine());
 
-  // Section 3 — הצד השני / ספק
+  // 3. הצד השני / ספק
   pushHeading(children, "3. הצד השני / ספק");
-  pushKV(children, "שם", li.counterparty || req.supplier_name || "—");
-  pushKV(
-    children,
-    "סטטוס במאגר",
-    supplier
-      ? supplier.status === "registered"
-        ? "רשום במאגר 2026"
-        : supplier.status === "not_registered"
-        ? "לא רשום במאגר 2026"
-        : "סטטוס לא ברור"
-      : req.supplier_name
-      ? "לא נמצא במאגר הדמו"
-      : "—"
-  );
+  pushKV(children, "שם", legal.second_party || req.supplier_name || "—");
+  pushKV(children, "סטטוס", legal.supplier_status || "—");
   children.push(emptyLine());
 
-  // Section 4 — סוג ההתקשרות המשוער
+  // 4. סוג ההתקשרות המשוער
   pushHeading(children, "4. סוג ההתקשרות המשוער");
-  const ate =
-    li.agreementTypeEstimate && li.agreementTypeEstimate in AGREEMENT_TYPE_LABEL
-      ? AGREEMENT_TYPE_LABEL[li.agreementTypeEstimate as AgreementTypeEstimate]
-      : "לא הוגדר — נדרשת ולידציה משפטית";
-  pushParagraph(children, ate);
-  if (li.agreementType) {
-    pushKV(
-      children,
-      "חדש / המשך",
-      li.agreementType === "new" ? "חדש" : li.agreementType === "extension" ? "המשך / הארכה" : "—"
-    );
-  }
+  pushParagraph(children, AGREEMENT_LABEL[legal.agreement_type_estimate]);
   children.push(emptyLine());
 
-  // Section 5 — פרטים מסחריים
+  // 5. פרטים מסחריים
   pushHeading(children, "5. פרטים מסחריים");
   pushKV(
     children,
     "סכום",
-    li.amount ||
-      (req.amount != null ? `${req.amount.toLocaleString("he-IL")} ₪` : "—")
+    legal.amount != null ? `${legal.amount.toLocaleString("he-IL")} ₪` : "—"
   );
-  pushKV(children, "לוח זמנים", li.schedule || "—");
-  pushKV(children, "סעיף תקציבי", li.budgetLine || "—");
-  pushKV(children, "קיימת הצעת מחיר?", yn(li.hasQuote));
-  pushKV(
-    children,
-    "ניקיון ההצעה",
-    li.quoteCleanliness === "clean"
-      ? "נקייה (תכולה / סכום / לו״ז)"
-      : li.quoteCleanliness === "supplier_terms"
-      ? "כוללת תנאי ספק"
-      : "לא ידוע"
-  );
-  if ((li.supplierTermsDetected ?? []).length > 0) {
+  pushKV(children, "לוח זמנים", legal.timeline || "—");
+  pushKV(children, "קיימת הצעת מחיר?", yn(legal.quote_exists));
+  if (legal.supplier_terms.length > 0) {
     pushParagraph(children, "תנאי ספק שזוהו:");
-    for (const t of li.supplierTermsDetected ?? []) {
+    for (const t of legal.supplier_terms) {
       pushBullet(children, t);
     }
   }
-  pushKV(children, "תידרש הזמנת רכש חתומה?", yn(li.purchaseOrderNeeded));
   children.push(emptyLine());
 
-  // Section 6 — תהליך בחירת ספק
+  // 6. תהליך בחירת ספק
   pushHeading(children, "6. תהליך בחירת ספק");
-  pushKV(children, "הספק נבחר?", yn(li.supplierSelected));
-  pushKV(children, "בוצע הליך תחרותי?", yn(li.competitiveProcess));
-  pushKV(children, "ספק יחיד?", yn(li.singleSupplier));
+  pushKV(children, "הספק נבחר?", yn(legal.supplier_selected));
+  pushKV(children, "בוצע הליך תחרותי?", yn(legal.competitive_process));
+  pushKV(children, "ספק יחיד?", yn(legal.single_supplier));
   children.push(emptyLine());
 
-  // Section 7 — סיכונים וחריגים
+  // 7. סיכונים וחריגים
   pushHeading(children, "7. סיכונים וחריגים");
-  pushKV(children, "פרטיות / מידע אישי", yn(li.privacy));
-  pushKV(children, "זכויות יוצרים / קניין רוחני", yn(li.copyright));
-  pushKV(children, "צילום משתתפים", yn(li.filmingParticipants));
-  pushKV(children, "נדרש ביטוח", yn(li.insuranceNeeded));
-  pushKV(children, "שותפים למיזם", yn(li.partners));
-  pushKV(children, "ספקי משנה", yn(li.subcontractors));
+  pushKV(children, "פרטיות / מידע אישי", yn(legal.privacy_or_personal_data));
+  pushKV(children, "זכויות יוצרים / קניין רוחני", yn(legal.copyrights_or_ip));
+  pushKV(children, "צילום משתתפים", yn(legal.participant_photography));
+  pushKV(children, "נדרש ביטוח", yn(legal.insurance_required));
+  pushKV(children, "שותפים למיזם", yn(legal.partners));
+  pushKV(children, "ספקי משנה", yn(legal.subcontractors));
+  if (legal.risks_and_exceptions.length > 0) {
+    pushParagraph(children, "סיכונים נוספים:");
+    for (const r of legal.risks_and_exceptions) pushBullet(children, r);
+  }
   children.push(emptyLine());
 
-  // Section 8 — מסמכים שצורפו או הוזכרו
+  // 8. מסמכים
   pushHeading(children, "8. מסמכים שצורפו או הוזכרו");
-  const allFiles = [
-    ...req.file_paths,
-    ...((li.extraFilePaths as string[]) ?? []),
-  ];
-  if (allFiles.length === 0) {
+  if (legal.documents.length === 0) {
     pushParagraph(children, "—");
   } else {
-    for (const f of allFiles) {
-      pushBullet(children, f.split("/").pop() ?? f);
-    }
-  }
-  if (req.outcome === "grant" || li.isGrant) {
-    pushParagraph(children, "מסמכי מענק:");
-    const docs = li.grantDocuments ?? ({} as GrantDocuments);
-    for (const k of Object.keys(GRANT_DOC_LABELS) as (keyof GrantDocuments)[]) {
-      const status = docs[k];
-      const label =
-        status === "yes"
-          ? "✓ קיים"
-          : status === "no"
-          ? "✗ חסר"
-          : "— לא ידוע";
-      pushBullet(children, `${GRANT_DOC_LABELS[k]} — ${label}`);
-    }
+    for (const d of legal.documents) pushBullet(children, d);
   }
   children.push(emptyLine());
 
-  // Section 9 — מידע להשלמה בהמשך
+  // 9. מידע להשלמה
   pushHeading(children, "9. מידע להשלמה בהמשך");
-  const missing = collectMissingFor(req, li).slice(0, 5);
+  const missing = legal.missing_info.slice(0, 5);
   if (missing.length === 0) {
     pushParagraph(children, "—");
   } else {
@@ -222,14 +170,9 @@ function buildDocument(ctx: BuildContext): Document {
   }
   children.push(emptyLine());
 
-  // Section 10 — סיבת ההעברה למשפטית
+  // 10. סיבת ההעברה למשפטית
   pushHeading(children, "10. סיבת ההעברה למשפטית");
-  pushParagraph(children, req.reasoning || "לא הוזן נימוק טכני נוסף.");
-  if (li.notes?.trim()) {
-    children.push(emptyLine());
-    pushParagraph(children, "הערות נוספות מהפונה:");
-    pushParagraph(children, li.notes);
-  }
+  pushParagraph(children, legal.reason_for_legal_review || req.reasoning || "—");
 
   return new Document({
     creator: "Rashi Bot",
@@ -267,10 +210,11 @@ function buildDocument(ctx: BuildContext): Document {
   });
 }
 
-// ------ helpers ------
-
 function emptyLine(): Paragraph {
-  return new Paragraph({ bidirectional: true, children: [new TextRun({ text: "", rightToLeft: true })] });
+  return new Paragraph({
+    bidirectional: true,
+    children: [new TextRun({ text: "", rightToLeft: true })],
+  });
 }
 
 function pushHeading(out: Paragraph[], text: string) {
@@ -317,22 +261,8 @@ function pushBullet(out: Paragraph[], text: string) {
   );
 }
 
-function yn(v?: string): string {
+function yn(v: YesNoUnknown): string {
   if (v === "yes") return "כן";
   if (v === "no") return "לא";
   return "לא ידוע";
-}
-
-function collectMissingFor(req: RequestRecord, li: LegalIntakePayload): string[] {
-  const m: string[] = [];
-  if (!li.purpose && !req.description) m.push("מטרת ההתקשרות");
-  if (!li.counterparty && !req.supplier_name) m.push("שם הצד השני / ספק");
-  if (!li.amount && req.amount == null) m.push("סכום");
-  if (!li.schedule) m.push("לוח זמנים");
-  if (!li.budgetLine) m.push("סעיף תקציבי");
-  if (!li.supplierSelected) m.push("האם הספק נבחר");
-  if (!li.competitiveProcess) m.push("האם בוצע הליך תחרותי");
-  if (!li.hasQuote) m.push("האם קיימת הצעת מחיר");
-  if (!li.quoteCleanliness) m.push("ניקיון ההצעה");
-  return m;
 }

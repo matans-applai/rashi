@@ -5,6 +5,11 @@ import type {
   LegalIntakePayload,
   RequestStatus,
 } from "./types";
+import type {
+  ChatMessage,
+  LegalIntakeResponse,
+  RoutingResponse,
+} from "./aiTypes";
 
 export interface NewRequestDraft {
   department: string;
@@ -146,6 +151,105 @@ export async function markSentToLegal(id: string): Promise<RequestRecord> {
   const { data, error } = await supabase
     .from(REQUESTS_TABLE)
     .update({ status: "sent_to_legal" })
+    .eq("id", id)
+    .select("*")
+    .single();
+  if (error) throw error;
+  return data as RequestRecord;
+}
+
+// ---------------------------------------------------------------------------
+// Chat-first persistence
+// ---------------------------------------------------------------------------
+
+/**
+ * Create a new request from the chat-first flow. We persist the original free
+ * text in `description` (so the existing UI keeps working), plus the full chat
+ * history and the LLM routing output in the new columns added by migration
+ * 0004_chat_columns.sql.
+ */
+export async function createChatRequest(args: {
+  userId: string;
+  userEmail: string | null;
+  description: string;
+  chatMessages: ChatMessage[];
+  routing: RoutingResponse;
+}): Promise<RequestRecord> {
+  const { userId, userEmail, description, chatMessages, routing } = args;
+  const payload = {
+    user_id: userId,
+    user_email: userEmail,
+    department: routing.request_summary.department_or_project ?? "",
+    description,
+    supplier_name: routing.request_summary.second_party ?? null,
+    amount: routing.request_summary.amount ?? null,
+    file_paths: [],
+    outcome: routing.route,
+    status: "classified" as RequestStatus,
+    reasoning: routing.reasoning_summary_he,
+    tags: routing.detected_triggers.map((t) => t.label_he),
+    legal_intake: null,
+    chat_messages: chatMessages,
+    llm_output: routing,
+    selected_route: routing.route,
+    route_confidence: routing.confidence,
+  };
+  const { data, error } = await supabase
+    .from(REQUESTS_TABLE)
+    .insert(payload)
+    .select("*")
+    .single();
+  if (error) throw error;
+  return data as RequestRecord;
+}
+
+/** Append a turn to the chat history and (optionally) update the LLM output. */
+export async function appendChatTurns(args: {
+  id: string;
+  messages: ChatMessage[];
+  routing?: RoutingResponse;
+}): Promise<RequestRecord> {
+  const update: Record<string, unknown> = { chat_messages: args.messages };
+  if (args.routing) {
+    update.llm_output = args.routing;
+    update.outcome = args.routing.route;
+    update.tags = args.routing.detected_triggers.map((t) => t.label_he);
+    update.reasoning = args.routing.reasoning_summary_he;
+    update.route_confidence = args.routing.confidence;
+  }
+  const { data, error } = await supabase
+    .from(REQUESTS_TABLE)
+    .update(update)
+    .eq("id", args.id)
+    .select("*")
+    .single();
+  if (error) throw error;
+  return data as RequestRecord;
+}
+
+/** Mark which route the user approved (may differ from the LLM proposal). */
+export async function approveRoute(
+  id: string,
+  route: RequestRecord["outcome"]
+): Promise<RequestRecord> {
+  const { data, error } = await supabase
+    .from(REQUESTS_TABLE)
+    .update({ selected_route: route, outcome: route })
+    .eq("id", id)
+    .select("*")
+    .single();
+  if (error) throw error;
+  return data as RequestRecord;
+}
+
+/** Persist the latest legal-intake structured output. */
+export async function saveLegalCase(
+  id: string,
+  legal: LegalIntakeResponse
+): Promise<RequestRecord> {
+  const { data, error } = await supabase
+    .from(REQUESTS_TABLE)
+    .update({ legal_case: legal.legal_case })
     .eq("id", id)
     .select("*")
     .single();

@@ -87,6 +87,12 @@ export interface RequestRecord {
   reasoning: string | null;
   tags: string[] | null;
   legal_intake: LegalIntakePayload | null;
+  // Chat-first / LLM columns (migration 0004). Optional so old rows still type.
+  chat_messages?: unknown | null;
+  llm_output?: unknown | null;
+  legal_case?: unknown | null;
+  selected_route?: RoutingOutcome | null;
+  route_confidence?: "low" | "medium" | "high" | null;
   created_at: string;
 }
 
