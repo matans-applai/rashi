@@ -72,10 +72,7 @@ export default function ChatInput({
             (isHero ? "text-base" : "text-sm")
           }
         />
-        <div className="flex items-center justify-between gap-3 mt-1 px-1">
-          <div className="text-[11px] text-slate-400">
-            Enter לשליחה • Shift+Enter שורה חדשה
-          </div>
+        <div className="flex items-center justify-end gap-3 mt-1 px-1">
           <button
             type="button"
             onClick={submit}

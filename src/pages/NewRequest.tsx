@@ -227,16 +227,17 @@ function HeroDescribe({
   return (
     <div className="text-center pt-8">
       <h1 className="text-3xl sm:text-4xl font-bold text-slate-900 mb-3">
-        ספרו לי על הפנייה
+        ספרו לנו על הפנייה
       </h1>
       <p className="text-slate-500 mb-10 max-w-2xl mx-auto leading-relaxed">
-        כתבו חופשי מה אתם צריכים. אפשר לכלול אם ידוע: מי הצד השני, מה מטרת
-        ההתקשרות, סכום, לו״ז, מסמכים קיימים ומה כל צד אמור לתת או לקבל.
+        כתבו בקצרה את מה שידוע לכם. אפשר לציין מי הגורם שמולו עובדים, מה מטרת
+        הפנייה, סכום משוער, לוחות זמנים, מסמכים קיימים ומה כל צד אמור לתת או
+        לקבל.
       </p>
       <div className="max-w-2xl mx-auto">
         <ChatInput
           size="hero"
-          placeholder="לדוגמה: רוצים להתקשר עם יועצי אסטרטגיה ABC לליווי הנהלה למחצית שנה, 90 אלף ₪, יש הצעת מחיר..."
+          placeholder="כתבו כאן את פרטי הפנייה…"
           onSend={onSend}
           chips={HERO_CHIPS}
           disabled={disabled}
