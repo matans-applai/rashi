@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import ConfigBanner from "../components/ConfigBanner";
 
@@ -91,6 +91,12 @@ export default function Login() {
               {loading ? "מתחבר..." : "התחבר"}
             </button>
           </form>
+
+          <div className="mt-4 text-center">
+            <Link to="/forgot-password" className="text-sm text-brand-600 hover:underline">
+              שכחתי סיסמה
+            </Link>
+          </div>
         </div>
 
       </div>
