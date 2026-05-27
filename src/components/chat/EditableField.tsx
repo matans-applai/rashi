@@ -66,10 +66,24 @@ export default function EditableField({
           <button
             type="button"
             onClick={() => setEditing(true)}
-            className="text-slate-400 hover:text-brand-600 transition text-[11px]"
+            className="inline-flex items-center justify-center w-6 h-6 rounded-md text-slate-400 hover:text-brand-600 hover:bg-brand-50 transition"
             aria-label={`ערוך ${label}`}
+            title={`ערוך ${label}`}
           >
-            ✏ ערוך
+            <svg
+              className="w-3.5 h-3.5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+              aria-hidden="true"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+              />
+            </svg>
           </button>
         )}
       </div>

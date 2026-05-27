@@ -49,6 +49,7 @@ export default function ChatWorkspace() {
   const [activeRecord, setActiveRecord] = useState<RequestRecord | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [sending, setSending] = useState(false);
   // Editable copy of intake_summary during review phase
   const [editedIntake, setEditedIntake] = useState<IntakeSummary | null>(null);
   // Whether user chose to correct the summary
@@ -222,33 +223,43 @@ export default function ChatWorkspace() {
     }
   }
 
-  /** Approve: save edits → download Word → mark as sent */
-  async function handleApprove() {
+  /** Send to legal: save edits → mark as sent → append confirmation message.
+   *  Does NOT auto-download Word — the user clicks "הורד מסמך Word" afterwards. */
+  async function handleSendToLegal() {
     if (!activeId || !activeRecord) return;
     const intakeSummary = editedIntake ?? intake?.intake_summary;
     if (!intakeSummary) return;
 
-    setDownloading(true);
+    setSending(true);
     try {
       // Save any user edits to the intake
-      const saved = await saveEditedIntake(activeId, intakeSummary);
-      setActiveRecord(saved);
+      await saveEditedIntake(activeId, intakeSummary);
 
-      // Download Word
-      await downloadLegalReviewDocx({
-        req: saved,
-        intake: intakeSummary,
-        requesterName: getUserDisplayName(user),
-        requesterEmail: user?.email ?? "",
-        uploadedFileNames: uploadedFiles.map((f) => f.file_name),
-      });
+      // Append confirmation message to the chat history so the user sees it
+      const confirmationMsg: ChatMessage = {
+        role: "assistant",
+        content:
+          "הפנייה סומנה כמוכנה להעברה למשפטית. ניתן להוריד את מסמך ה־Word כאן.",
+        ts: new Date().toISOString(),
+      };
+      const withConfirmation = [...messages, confirmationMsg];
+      setMessages(withConfirmation);
 
-      // Mark as sent
+      // Persist the chat history with the confirmation
+      if (intake) {
+        await updateIntake({
+          id: activeId,
+          chatMessages: withConfirmation,
+          intake,
+        });
+      }
+
+      // Mark as sent (sets status="sent_to_legal" + sent_at)
       const sent = await markSentToLegal(activeId);
       setActiveRecord(sent);
       loadRequests();
     } finally {
-      setDownloading(false);
+      setSending(false);
     }
   }
 
@@ -377,17 +388,15 @@ export default function ChatWorkspace() {
                         files={uploadedFiles}
                       />
 
-                      {/* Approve / Correct buttons */}
+                      {/* Send-to-legal / Correct buttons */}
                       <div className="flex flex-wrap gap-3 justify-center pt-2 pb-4">
                         <button
                           type="button"
                           className="btn-primary rounded-xl px-6 py-2.5 text-sm font-medium"
-                          onClick={handleApprove}
-                          disabled={downloading}
+                          onClick={handleSendToLegal}
+                          disabled={sending}
                         >
-                          {downloading
-                            ? "מכין מסמך..."
-                            : "אשר והורד Word"}
+                          {sending ? "מעביר..." : "העבר למשפטית"}
                         </button>
                         <button
                           type="button"
@@ -515,14 +524,17 @@ function SentView({
               {title}
             </span>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
             <button
               type="button"
-              className="text-xs text-emerald-700 hover:text-emerald-900 font-medium"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium px-3 py-1.5 disabled:opacity-50"
               onClick={onDownload}
               disabled={!intake || downloading}
             >
-              {downloading ? "מכין..." : "הורד Word"}
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              {downloading ? "מכין..." : "הורד מסמך Word"}
             </button>
             <button
               type="button"
