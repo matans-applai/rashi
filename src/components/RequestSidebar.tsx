@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { RequestRecord } from "../lib/types";
 import type { IntakeResponse, IntakeSummary } from "../lib/aiTypes";
 
@@ -6,6 +7,7 @@ interface Props {
   activeId: string | null;
   onSelect: (id: string) => void;
   onNew: () => void;
+  onDelete: (id: string) => void;
   open: boolean;
   onClose: () => void;
 }
@@ -15,6 +17,7 @@ export default function RequestSidebar({
   activeId,
   onSelect,
   onNew,
+  onDelete,
   open,
 }: Props) {
   return (
@@ -55,6 +58,7 @@ export default function RequestSidebar({
                 req={r}
                 active={r.id === activeId}
                 onClick={() => onSelect(r.id)}
+                onDelete={() => onDelete(r.id)}
               />
             ))}
           </ul>
@@ -68,11 +72,15 @@ function SidebarItem({
   req,
   active,
   onClick,
+  onDelete,
 }: {
   req: RequestRecord;
   active: boolean;
   onClick: () => void;
+  onDelete: () => void;
 }) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
   const intake =
     (req.legal_case as IntakeSummary | null) ??
     ((req.llm_output as IntakeResponse | null)?.intake_summary ?? null);
@@ -88,8 +96,35 @@ function SidebarItem({
     month: "short",
   });
 
+  if (confirmDelete) {
+    return (
+      <li className="rounded-xl bg-red-50 border border-red-200 px-3 py-2.5">
+        <p className="text-xs text-red-800 mb-2">למחוק את הפנייה?</p>
+        <div className="flex gap-2 justify-end">
+          <button
+            type="button"
+            className="text-xs px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-slate-600 hover:bg-slate-50"
+            onClick={() => setConfirmDelete(false)}
+          >
+            ביטול
+          </button>
+          <button
+            type="button"
+            className="text-xs px-2.5 py-1 rounded-lg bg-red-600 text-white hover:bg-red-700"
+            onClick={() => {
+              setConfirmDelete(false);
+              onDelete();
+            }}
+          >
+            מחק
+          </button>
+        </div>
+      </li>
+    );
+  }
+
   return (
-    <li>
+    <li className="group relative">
       <button
         type="button"
         onClick={onClick}
@@ -118,6 +153,21 @@ function SidebarItem({
           </span>
           <span className="text-[10px] text-slate-400">{dateStr}</span>
         </div>
+      </button>
+
+      {/* Delete button — appears on hover */}
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          setConfirmDelete(true);
+        }}
+        className="absolute left-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded-lg hover:bg-red-50 text-slate-400 hover:text-red-500"
+        aria-label="מחק פנייה"
+      >
+        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+        </svg>
       </button>
     </li>
   );

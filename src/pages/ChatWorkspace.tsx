@@ -4,17 +4,19 @@ import ChatBubble from "../components/chat/ChatBubble";
 import ChatInput from "../components/chat/ChatInput";
 import AiThinkingState from "../components/chat/AiThinkingState";
 import AIErrorPanel from "../components/chat/AIErrorPanel";
-import FileUpload from "../components/chat/FileUpload";
+import IntakeReviewCards from "../components/chat/IntakeReviewCards";
 import RequestSidebar from "../components/RequestSidebar";
 import { useAuth, getUserDisplayName } from "../lib/auth";
 import { callIntake, AIError } from "../lib/aiClient";
 import {
   createIntakeRequest,
   updateIntake,
+  saveEditedIntake,
   getRequest,
-  linkFilesToRequest,
   listMyRequests,
   listRequestFiles,
+  markSentToLegal,
+  softDeleteRequest,
 } from "../lib/requests";
 import { downloadLegalReviewDocx } from "../lib/docxBuilder";
 import type {
@@ -47,6 +49,10 @@ export default function ChatWorkspace() {
   const [activeRecord, setActiveRecord] = useState<RequestRecord | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  // Editable copy of intake_summary during review phase
+  const [editedIntake, setEditedIntake] = useState<IntakeSummary | null>(null);
+  // Whether user chose to correct the summary
+  const [correcting, setCorrecting] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -54,6 +60,14 @@ export default function ChatWorkspace() {
     activeRecord?.status === "sent_to_legal" ||
     activeRecord?.status === "ready_for_legal" ||
     activeRecord?.status === "completed";
+
+  // Whether we're in the review/approval phase
+  const showReview =
+    !isSent &&
+    !thinking &&
+    !correcting &&
+    intake?.ready_for_final_summary === true &&
+    messages.length > 0;
 
   const loadRequests = useCallback(async () => {
     if (!user) return;
@@ -71,6 +85,13 @@ export default function ChatWorkspace() {
     }
   }, [routeId]);
 
+  // When intake becomes ready for summary, populate the editable copy
+  useEffect(() => {
+    if (intake?.ready_for_final_summary && intake.intake_summary) {
+      setEditedIntake({ ...intake.intake_summary });
+    }
+  }, [intake?.ready_for_final_summary]);
+
   useEffect(() => {
     if (!activeId) {
       setMessages([]);
@@ -78,6 +99,8 @@ export default function ChatWorkspace() {
       setActiveRecord(null);
       setUploadedFiles([]);
       setError(null);
+      setEditedIntake(null);
+      setCorrecting(false);
       return;
     }
     let cancelled = false;
@@ -89,6 +112,11 @@ export default function ChatWorkspace() {
       setMessages(msgs);
       const llm = rec.llm_output as IntakeResponse | null;
       setIntake(llm);
+      if (llm?.ready_for_final_summary && llm.intake_summary) {
+        // Use legal_case (edited version) if available, otherwise LLM output
+        const edited = rec.legal_case as IntakeSummary | null;
+        setEditedIntake(edited ?? { ...llm.intake_summary });
+      }
       const files = await listRequestFiles(activeId);
       if (!cancelled) setUploadedFiles(files);
     })();
@@ -100,7 +128,7 @@ export default function ChatWorkspace() {
       top: scrollRef.current.scrollHeight,
       behavior: "smooth",
     });
-  }, [messages, thinking]);
+  }, [messages, thinking, showReview]);
 
   function handleNewRequest() {
     setActiveId(null);
@@ -109,19 +137,31 @@ export default function ChatWorkspace() {
     setActiveRecord(null);
     setUploadedFiles([]);
     setError(null);
+    setEditedIntake(null);
+    setCorrecting(false);
     nav("/chat");
   }
 
   function handleSelectRequest(id: string) {
     setActiveId(id);
     setError(null);
+    setCorrecting(false);
     nav(`/chat/${id}`);
     setSidebarOpen(false);
+  }
+
+  async function handleDeleteRequest(id: string) {
+    await softDeleteRequest(id);
+    if (activeId === id) {
+      handleNewRequest();
+    }
+    loadRequests();
   }
 
   async function sendTurn(text: string) {
     setError(null);
     setLastUserMessage(text);
+    setCorrecting(false);
     const userMsg: ChatMessage = {
       role: "user",
       content: text,
@@ -157,19 +197,6 @@ export default function ChatWorkspace() {
         setActiveId(record.id);
         setActiveRecord(record);
         nav(`/chat/${record.id}`, { replace: true });
-
-        const unlinked = uploadedFiles.filter((f) => !f.request_id);
-        if (unlinked.length > 0) {
-          await linkFilesToRequest(
-            unlinked.map((f) => f.id),
-            record.id
-          );
-          setUploadedFiles((prev) =>
-            prev.map((f) =>
-              f.request_id ? f : { ...f, request_id: record.id }
-            )
-          );
-        }
         loadRequests();
       } else if (activeId) {
         const updated = await updateIntake({
@@ -195,31 +222,37 @@ export default function ChatWorkspace() {
     }
   }
 
-  async function continueManually() {
-    if (!user) return;
-    if (!activeId) {
-      const description =
-        messages.find((m) => m.role === "user")?.content ?? "";
-      const fakeIntake = makeEmptyIntake(description);
-      const record = await createIntakeRequest({
-        userId: user.id,
-        userEmail: user.email ?? null,
-        description,
-        chatMessages: messages,
-        intake: fakeIntake,
+  /** Approve: save edits → download Word → mark as sent */
+  async function handleApprove() {
+    if (!activeId || !activeRecord) return;
+    const intakeSummary = editedIntake ?? intake?.intake_summary;
+    if (!intakeSummary) return;
+
+    setDownloading(true);
+    try {
+      // Save any user edits to the intake
+      const saved = await saveEditedIntake(activeId, intakeSummary);
+      setActiveRecord(saved);
+
+      // Download Word
+      await downloadLegalReviewDocx({
+        req: saved,
+        intake: intakeSummary,
+        requesterName: getUserDisplayName(user),
+        requesterEmail: user?.email ?? "",
+        uploadedFileNames: uploadedFiles.map((f) => f.file_name),
       });
-      setActiveId(record.id);
-      setActiveRecord(record);
-      nav(`/chat/${record.id}`, { replace: true });
+
+      // Mark as sent
+      const sent = await markSentToLegal(activeId);
+      setActiveRecord(sent);
       loadRequests();
+    } finally {
+      setDownloading(false);
     }
   }
 
-  function goToReview() {
-    if (!activeId) return;
-    nav(`/requests/${activeId}`);
-  }
-
+  /** Download Word without changing status (for SentView re-downloads) */
   async function handleDownload() {
     if (!activeRecord) return;
     const intakeSummary =
@@ -242,7 +275,6 @@ export default function ChatWorkspace() {
   }
 
   const isBlank = !activeId && messages.length === 0;
-  const hasMessages = messages.length > 0;
 
   return (
     <div className="h-screen flex flex-col" dir="rtl">
@@ -294,6 +326,7 @@ export default function ChatWorkspace() {
           activeId={activeId}
           onSelect={handleSelectRequest}
           onNew={handleNewRequest}
+          onDelete={handleDeleteRequest}
           open={sidebarOpen}
           onClose={() => setSidebarOpen(false)}
         />
@@ -309,13 +342,7 @@ export default function ChatWorkspace() {
               onBack={handleNewRequest}
             />
           ) : isBlank ? (
-            <BlankState
-              onSend={sendTurn}
-              disabled={thinking}
-              userId={user?.id ?? ""}
-              uploadedFiles={uploadedFiles}
-              onFilesChange={setUploadedFiles}
-            />
+            <BlankState onSend={sendTurn} disabled={thinking} />
           ) : (
             <div className="flex-1 flex flex-col overflow-hidden">
               {/* Messages */}
@@ -328,49 +355,80 @@ export default function ChatWorkspace() {
                     <ChatBubble key={i} message={m} />
                   ))}
                   {thinking && <AiThinkingState />}
+
+                  {/* In-chat review cards when ready */}
+                  {showReview && editedIntake && (
+                    <div className="mt-6 space-y-4">
+                      <div className="bg-brand-50 border border-brand-200 rounded-2xl px-4 py-3">
+                        <h3 className="text-sm font-semibold text-brand-800 mb-1">
+                          סיכום הפנייה
+                        </h3>
+                        <p className="text-xs text-brand-600">
+                          בדקו את הפרטים ולחצו ״אשר״ או תקנו ישירות.
+                        </p>
+                      </div>
+
+                      <IntakeReviewCards
+                        intake={editedIntake}
+                        onChange={(next) => setEditedIntake(next)}
+                        missing={intake?.missing_information?.map(
+                          (m) => m.question_he
+                        )}
+                        files={uploadedFiles}
+                      />
+
+                      {/* Approve / Correct buttons */}
+                      <div className="flex flex-wrap gap-3 justify-center pt-2 pb-4">
+                        <button
+                          type="button"
+                          className="btn-primary rounded-xl px-6 py-2.5 text-sm font-medium"
+                          onClick={handleApprove}
+                          disabled={downloading}
+                        >
+                          {downloading
+                            ? "מכין מסמך..."
+                            : "אשר והורד Word"}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-secondary rounded-xl px-6 py-2.5 text-sm font-medium"
+                          onClick={() => setCorrecting(true)}
+                        >
+                          יש לי תיקון
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 
-              {/* Bottom area */}
+              {/* Bottom input area */}
               <div className="flex-shrink-0 border-t border-slate-100 bg-white px-4 py-3">
                 <div className="max-w-3xl mx-auto space-y-2">
                   {error && (
                     <AIErrorPanel
                       onRetry={retryLastTurn}
-                      onContinueManual={continueManually}
+                      onContinueManual={() => {}}
                       manualBusy={false}
                     />
                   )}
-                  {!error && (
-                    <>
-                      <ChatInput
-                        placeholder='ענה/י כאן, או כתבו "תמשיך" כדי לעבור לסיכום'
-                        onSend={sendTurn}
-                        busy={thinking}
-                        disabled={thinking}
-                      />
-                      <div className="flex items-center gap-4 justify-between">
-                        <div className="flex-1">
-                          {user && (
-                            <FileUpload
-                              userId={user.id}
-                              requestId={activeId}
-                              files={uploadedFiles}
-                              onFilesChange={setUploadedFiles}
-                            />
-                          )}
-                        </div>
-                        {hasMessages && activeId && (
-                          <button
-                            type="button"
-                            className="text-xs text-brand-600 hover:text-brand-700 font-medium whitespace-nowrap"
-                            onClick={goToReview}
-                          >
-                            המשך לסיכום ועריכה
-                          </button>
-                        )}
-                      </div>
-                    </>
+                  {!error && !showReview && (
+                    <ChatInput
+                      placeholder={
+                        correcting
+                          ? "כתבו מה לתקן בסיכום..."
+                          : 'ענה/י כאן...'
+                      }
+                      onSend={sendTurn}
+                      busy={thinking}
+                      disabled={thinking}
+                    />
+                  )}
+                  {showReview && !correcting && (
+                    <p className="text-xs text-slate-400 text-center py-1">
+                      ערכו שדות בסיכום למעלה, או לחצו ״יש לי תיקון״ כדי לכתוב
+                      חופשי.
+                    </p>
                   )}
                 </div>
               </div>
@@ -393,15 +451,9 @@ export default function ChatWorkspace() {
 function BlankState({
   onSend,
   disabled,
-  userId,
-  uploadedFiles,
-  onFilesChange,
 }: {
   onSend: (t: string) => void;
   disabled?: boolean;
-  userId: string;
-  uploadedFiles: RequestFile[];
-  onFilesChange: (files: RequestFile[]) => void;
 }) {
   return (
     <div className="flex-1 flex items-center justify-center px-4">
@@ -416,23 +468,13 @@ function BlankState({
           כתבו חופשי את מה שידוע לכם — הצד השני, מטרת ההתקשרות, סכום, לוחות
           זמנים, מסמכים קיימים ומה כל צד אמור לתת או לקבל.
         </p>
-        <div className="space-y-3">
-          <ChatInput
-            size="hero"
-            placeholder="כתבו כאן את פרטי הפנייה…"
-            onSend={onSend}
-            chips={HERO_CHIPS}
-            disabled={disabled}
-          />
-          {userId && (
-            <FileUpload
-              userId={userId}
-              requestId={null}
-              files={uploadedFiles}
-              onFilesChange={onFilesChange}
-            />
-          )}
-        </div>
+        <ChatInput
+          size="hero"
+          placeholder="כתבו כאן את פרטי הפנייה..."
+          onSend={onSend}
+          chips={HERO_CHIPS}
+          disabled={disabled}
+        />
       </div>
     </div>
   );
@@ -506,6 +548,13 @@ function SentView({
           )}
         </div>
       </div>
+
+      {/* No input area — read-only */}
+      <div className="flex-shrink-0 border-t border-slate-100 bg-slate-100 px-4 py-3">
+        <p className="text-xs text-slate-400 text-center">
+          פנייה זו נשלחה למשפטית ואינה ניתנת לעריכה.
+        </p>
+      </div>
     </div>
   );
 }
@@ -543,7 +592,7 @@ function makeEmptyIntake(description: string): IntakeResponse {
     missing_information: [],
     next_questions_he: [],
     can_continue_with_partial_info: true,
-    assistant_message_he: "ניתן למלא ולערוך את הפרטים ידנית בעמוד הסיכום.",
+    assistant_message_he: "",
     ready_for_final_summary: true,
   };
 }

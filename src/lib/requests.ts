@@ -159,12 +159,21 @@ export async function markReadyForLegal(id: string): Promise<RequestRecord> {
 export async function markSentToLegal(id: string): Promise<RequestRecord> {
   const { data, error } = await supabase
     .from(REQUESTS_TABLE)
-    .update({ status: "sent_to_legal" })
+    .update({ status: "sent_to_legal", sent_at: new Date().toISOString() })
     .eq("id", id)
     .select("*")
     .single();
   if (error) throw error;
   return data as RequestRecord;
+}
+
+/** Soft-delete: set deleted_at so the request disappears from the sidebar. */
+export async function softDeleteRequest(id: string): Promise<void> {
+  const { error } = await supabase
+    .from(REQUESTS_TABLE)
+    .update({ deleted_at: new Date().toISOString() })
+    .eq("id", id);
+  if (error) throw error;
 }
 
 // ---------------------------------------------------------------------------
@@ -176,6 +185,7 @@ export async function listMyRequests(userId: string): Promise<RequestRecord[]> {
     .from(REQUESTS_TABLE)
     .select("*")
     .eq("user_id", userId)
+    .is("deleted_at", null)
     .order("created_at", { ascending: false });
   if (error) throw error;
   return (data ?? []) as RequestRecord[];

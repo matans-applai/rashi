@@ -95,6 +95,8 @@ export interface RequestRecord {
   selected_route?: RoutingOutcome | null;
   route_confidence?: "low" | "medium" | "high" | null;
   created_at: string;
+  deleted_at?: string | null;
+  sent_at?: string | null;
 }
 
 /**
