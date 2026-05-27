@@ -131,7 +131,10 @@ export default function ChatWorkspace() {
     setMessages(newMessages);
     setThinking(true);
     try {
-      const result = await callIntake({ messages: newMessages });
+      const result = await callIntake({
+        messages: newMessages,
+        previousIntake: intake?.intake_summary ?? null,
+      });
       const assistantMsg: ChatMessage = {
         role: "assistant",
         content: result.assistant_message_he,
@@ -533,6 +536,7 @@ function makeEmptyIntake(description: string): IntakeResponse {
       subcontractors: "unknown",
       supplier_terms_or_contract: "unknown",
       grant_related: "unknown",
+      urgency: "unknown",
       special_notes: [],
     },
     known_information_he: [],

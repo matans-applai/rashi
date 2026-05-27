@@ -14,6 +14,7 @@ import type {
   IntakeSummary,
   IntakeResponse,
   SecondPartyType,
+  Urgency,
   YesNoUnknown,
 } from "./aiTypes";
 import type { RequestRecord } from "./types";
@@ -36,6 +37,13 @@ const AGREEMENT_LABEL: Record<AgreementState, string> = {
 const CURRENCY_LABEL: Record<Currency, string> = {
   ILS: "₪",
   unknown: "—",
+};
+
+const URGENCY_LABEL: Record<Urgency, string> = {
+  normal: "רגיל",
+  urgent: "דחוף",
+  critical: "קריטי",
+  unknown: "לא צוין",
 };
 
 interface BuildContext {
@@ -143,6 +151,9 @@ function buildDocument(ctx: BuildContext): Document {
   pushKV(children, "קיימת הצעת מחיר?", yn(intake.quote_exists));
   if (intake.quote_details) {
     pushParagraph(children, `פרטי הצעת המחיר: ${intake.quote_details}`);
+  }
+  if (intake.urgency && intake.urgency !== "normal" && intake.urgency !== "unknown") {
+    pushKV(children, "דחיפות", URGENCY_LABEL[intake.urgency]);
   }
   children.push(emptyLine());
 

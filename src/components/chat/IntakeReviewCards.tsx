@@ -4,6 +4,7 @@ import type {
   Currency,
   IntakeSummary,
   SecondPartyType,
+  Urgency,
   YesNoUnknown,
 } from "../../lib/aiTypes";
 import type { RequestFile } from "../../lib/types";
@@ -33,6 +34,13 @@ const AGREEMENT_STATE_OPTIONS = [
 const CURRENCY_OPTIONS = [
   { value: "ILS", label: "₪ (שקל)" },
   { value: "unknown", label: "לא ידוע" },
+];
+
+const URGENCY_OPTIONS = [
+  { value: "normal", label: "רגיל" },
+  { value: "urgent", label: "דחוף" },
+  { value: "critical", label: "קריטי" },
+  { value: "unknown", label: "לא צוין" },
 ];
 
 interface Props {
@@ -171,6 +179,13 @@ export default function IntakeReviewCards({ intake, onChange, missing, files }: 
             value={intake.quote_details}
             onChange={(v) => set("quote_details", (v as string | null) ?? null)}
             className="sm:col-span-2"
+          />
+          <EditableField
+            label="דחיפות"
+            mode="select"
+            options={URGENCY_OPTIONS}
+            value={intake.urgency ?? "unknown"}
+            onChange={(v) => set("urgency", (v as Urgency) ?? "unknown")}
           />
         </Grid>
       </Card>

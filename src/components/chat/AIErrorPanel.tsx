@@ -1,4 +1,6 @@
 interface Props {
+  message?: string;
+  errorCode?: string | null;
   onRetry: () => void;
   onContinueManual: () => void;
   manualBusy?: boolean;
@@ -6,28 +8,65 @@ interface Props {
 
 /**
  * Hebrew RTL error fallback. Shown when OpenAI fails / rate limits /
- * returns invalid output. The user can retry or continue manually.
+ * returns invalid output / times out. The user can retry or continue
+ * manually.
  */
 export default function AIErrorPanel({
+  message,
+  errorCode,
   onRetry,
   onContinueManual,
   manualBusy,
 }: Props) {
+  const isRateLimit = errorCode === "AI_RATE_LIMIT";
+  const isTimeout = errorCode === "AI_TIMEOUT" || errorCode === "CLIENT_TIMEOUT";
+
+  const defaultMessage =
+    "אפשר לנסות שוב בעוד רגע, או להמשיך לסיכום ידני ולצרף את הפרטים למחלקה המשפטית.";
+
+  const displayMessage = message || defaultMessage;
+
   return (
-    <div className="rounded-2xl bg-red-50 border border-red-200 p-4 text-sm">
-      <div className="font-semibold text-red-900 mb-1">
-        נראה שיש כרגע תקלה בעיבוד האוטומטי
+    <div
+      className={
+        "rounded-2xl border p-4 text-sm " +
+        (isRateLimit
+          ? "bg-amber-50 border-amber-200"
+          : isTimeout
+            ? "bg-orange-50 border-orange-200"
+            : "bg-red-50 border-red-200")
+      }
+    >
+      <div
+        className={
+          "font-semibold mb-1 " +
+          (isRateLimit
+            ? "text-amber-900"
+            : isTimeout
+              ? "text-orange-900"
+              : "text-red-900")
+        }
+      >
+        {isRateLimit
+          ? "עומס זמני"
+          : isTimeout
+            ? "זמן התגובה ארוך מהרגיל"
+            : "נראה שיש כרגע תקלה בעיבוד האוטומטי"}
       </div>
-      <p className="text-red-800 mb-3">
-        אפשר לנסות שוב בעוד רגע, או להמשיך לסיכום ידני ולצרף את הפרטים למחלקה
-        המשפטית.
+      <p
+        className={
+          "mb-3 " +
+          (isRateLimit
+            ? "text-amber-800"
+            : isTimeout
+              ? "text-orange-800"
+              : "text-red-800")
+        }
+      >
+        {displayMessage}
       </p>
       <div className="flex flex-wrap gap-2">
-        <button
-          type="button"
-          className="btn-primary"
-          onClick={onRetry}
-        >
+        <button type="button" className="btn-primary" onClick={onRetry}>
           נסה שוב
         </button>
         <button

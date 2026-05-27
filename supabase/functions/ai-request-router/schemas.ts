@@ -66,6 +66,10 @@ export const INTAKE_SCHEMA = {
             enum: ["yes", "no", "unknown"],
           },
           grant_related: { type: "string", enum: ["yes", "no", "unknown"] },
+          urgency: {
+            type: "string",
+            enum: ["normal", "urgent", "critical", "unknown"],
+          },
           special_notes: { type: "array", items: { type: "string" } },
         },
         required: [
@@ -92,6 +96,7 @@ export const INTAKE_SCHEMA = {
           "subcontractors",
           "supplier_terms_or_contract",
           "grant_related",
+          "urgency",
           "special_notes",
         ],
       },

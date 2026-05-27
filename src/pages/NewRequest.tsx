@@ -5,17 +5,17 @@ import StepIndicator from "../components/chat/StepIndicator";
 import ChatBubble from "../components/chat/ChatBubble";
 import ChatInput from "../components/chat/ChatInput";
 import AiThinkingState from "../components/chat/AiThinkingState";
+import KnownInfoCard from "../components/chat/KnownInfoCard";
 import AIErrorPanel from "../components/chat/AIErrorPanel";
-import FileUpload from "../components/chat/FileUpload";
 import { useAuth } from "../lib/auth";
 import { callIntake, AIError } from "../lib/aiClient";
-import { createIntakeRequest, updateIntake, linkFilesToRequest } from "../lib/requests";
+import { createIntakeRequest, updateIntake } from "../lib/requests";
 import type {
   ChatMessage,
   IntakeResponse,
   IntakeStep,
 } from "../lib/aiTypes";
-import type { RequestRecord, RequestFile } from "../lib/types";
+import type { RequestRecord } from "../lib/types";
 
 const HERO_CHIPS = [
   { label: "יש לי ספק / יועץ", value: "אנחנו רוצים להתקשר עם " },
@@ -25,6 +25,16 @@ const HERO_CHIPS = [
   { label: "לא בטוח מה צריך", value: "אני לא בטוח/ה איזה סוג הסכם צריך — " },
 ];
 
+const SLOW_WARNING_MS = 15_000; // Show "taking longer" after 15s
+const TIMEOUT_MS = 35_000;      // Show timeout error after 35s
+
+/**
+ * Chat-first legal-intake assistant.
+ *
+ * The user describes the request freely. The AI extracts structured intake
+ * info and asks short follow-ups. When the user is done (or the AI says
+ * ready_for_final_summary), we persist and navigate to the editable review.
+ */
 export default function NewRequest() {
   const { user } = useAuth();
   const nav = useNavigate();
@@ -33,13 +43,16 @@ export default function NewRequest() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [intake, setIntake] = useState<IntakeResponse | null>(null);
   const [thinking, setThinking] = useState(false);
+  const [thinkingSlow, setThinkingSlow] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [errorCode, setErrorCode] = useState<string | null>(null);
   const [persisting, setPersisting] = useState(false);
   const [recordId, setRecordId] = useState<string | null>(null);
   const [lastUserMessage, setLastUserMessage] = useState<string | null>(null);
-  const [uploadedFiles, setUploadedFiles] = useState<RequestFile[]>([]);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const slowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
     scrollRef.current?.scrollTo({
       top: scrollRef.current.scrollHeight,
@@ -47,9 +60,19 @@ export default function NewRequest() {
     });
   }, [messages, intake, thinking]);
 
+  // Clean up timer on unmount
+  useEffect(() => {
+    return () => {
+      if (slowTimerRef.current) clearTimeout(slowTimerRef.current);
+    };
+  }, []);
+
   async function sendTurn(text: string) {
     setError(null);
+    setErrorCode(null);
     setLastUserMessage(text);
+    setThinkingSlow(false);
+
     const userMsg: ChatMessage = {
       role: "user",
       content: text,
@@ -59,8 +82,25 @@ export default function NewRequest() {
     setMessages(newMessages);
     setStep("chat");
     setThinking(true);
+
+    // Start slow-warning timer
+    slowTimerRef.current = setTimeout(() => {
+      setThinkingSlow(true);
+    }, SLOW_WARNING_MS);
+
     try {
-      const result = await callIntake({ messages: newMessages });
+      const result = await callIntake({
+        messages: newMessages,
+        previousIntake: intake?.intake_summary ?? null,
+      });
+
+      // Clear slow timer
+      if (slowTimerRef.current) {
+        clearTimeout(slowTimerRef.current);
+        slowTimerRef.current = null;
+      }
+      setThinkingSlow(false);
+
       const assistantMsg: ChatMessage = {
         role: "assistant",
         content: result.assistant_message_he,
@@ -70,9 +110,11 @@ export default function NewRequest() {
       setMessages(withAssistant);
       setIntake(result);
 
+      // Persist progressively so the user can leave and come back.
       let record: RequestRecord | null = null;
       if (!recordId && user) {
-        const description = newMessages.find((m) => m.role === "user")?.content ?? text;
+        const description =
+          newMessages.find((m) => m.role === "user")?.content ?? text;
         record = await createIntakeRequest({
           userId: user.id,
           userEmail: user.email ?? null,
@@ -81,17 +123,6 @@ export default function NewRequest() {
           intake: result,
         });
         setRecordId(record.id);
-        // Link any files uploaded before the record existed.
-        const unlinked = uploadedFiles.filter((f) => !f.request_id);
-        if (unlinked.length > 0) {
-          await linkFilesToRequest(
-            unlinked.map((f) => f.id),
-            record.id
-          );
-          setUploadedFiles((prev) =>
-            prev.map((f) => (f.request_id ? f : { ...f, request_id: record!.id }))
-          );
-        }
       } else if (recordId) {
         await updateIntake({
           id: recordId,
@@ -100,8 +131,20 @@ export default function NewRequest() {
         });
       }
     } catch (e) {
-      const msg = e instanceof AIError ? e.message : String(e);
-      setError(msg);
+      // Clear slow timer
+      if (slowTimerRef.current) {
+        clearTimeout(slowTimerRef.current);
+        slowTimerRef.current = null;
+      }
+      setThinkingSlow(false);
+
+      if (e instanceof AIError) {
+        setError(e.messageHe);
+        setErrorCode(e.code);
+      } else {
+        setError(String(e));
+        setErrorCode("AI_UNKNOWN_ERROR");
+      }
     } finally {
       setThinking(false);
     }
@@ -119,17 +162,20 @@ export default function NewRequest() {
 
   function retryLastTurn() {
     if (lastUserMessage) {
+      // Remove the last user message from history and resend.
       setMessages((m) => m.slice(0, -1));
       sendTurn(lastUserMessage);
     }
   }
 
   async function continueManually() {
+    // If the AI is broken, save what we have and let the user edit manually.
     if (!user) return;
     setPersisting(true);
     try {
       if (!recordId) {
-        const description = messages.find((m) => m.role === "user")?.content ?? "";
+        const description =
+          messages.find((m) => m.role === "user")?.content ?? "";
         const fakeIntake = makeEmptyIntake(description);
         const record = await createIntakeRequest({
           userId: user.id,
@@ -139,13 +185,6 @@ export default function NewRequest() {
           intake: fakeIntake,
         });
         setRecordId(record.id);
-        const unlinked = uploadedFiles.filter((f) => !f.request_id);
-        if (unlinked.length > 0) {
-          await linkFilesToRequest(
-            unlinked.map((f) => f.id),
-            record.id
-          );
-        }
         nav(`/requests/${record.id}`);
       } else {
         nav(`/requests/${recordId}`);
@@ -155,19 +194,18 @@ export default function NewRequest() {
     }
   }
 
+  // -------- Render --------
+  const thinkingLabel = thinkingSlow
+    ? "זה לוקח קצת יותר מהרגיל…"
+    : "מנתח/ת...";
+
   return (
     <Layout>
       <div className="max-w-3xl mx-auto">
         <StepIndicator current={step === "describe" ? "describe" : "chat"} />
 
         {step === "describe" && messages.length === 0 ? (
-          <HeroDescribe
-            onSend={sendTurn}
-            disabled={thinking}
-            userId={user?.id ?? ""}
-            uploadedFiles={uploadedFiles}
-            onFilesChange={setUploadedFiles}
-          />
+          <HeroDescribe onSend={sendTurn} disabled={thinking} />
         ) : (
           <div className="space-y-4">
             <div
@@ -177,11 +215,13 @@ export default function NewRequest() {
               {messages.map((m, i) => (
                 <ChatBubble key={i} message={m} />
               ))}
-              {thinking && <AiThinkingState />}
+              {thinking && <AiThinkingState label={thinkingLabel} />}
             </div>
 
             {error && (
               <AIErrorPanel
+                message={error}
+                errorCode={errorCode}
                 onRetry={retryLastTurn}
                 onContinueManual={continueManually}
                 manualBusy={persisting}
@@ -190,38 +230,41 @@ export default function NewRequest() {
 
             {!error && intake && (
               <>
+                <KnownInfoCard intake={intake} />
                 <ChatInput
                   placeholder='ענה/י כאן, או כתבו "תמשיך" כדי לעבור לסיכום'
                   onSend={sendTurn}
                   busy={thinking}
                   disabled={thinking}
                 />
-                {user && (
-                  <FileUpload
-                    userId={user.id}
-                    requestId={recordId}
-                    files={uploadedFiles}
-                    onFilesChange={setUploadedFiles}
-                  />
-                )}
-                <div className="flex items-center gap-3 justify-start pt-2 flex-wrap">
+                <div className="flex items-center gap-3 justify-end pt-2 flex-wrap">
                   <button
                     type="button"
-                    className="text-xs text-slate-400 hover:text-slate-600 transition-colors"
+                    className="btn-secondary"
                     onClick={() => nav("/dashboard")}
                   >
                     שמור וצא
                   </button>
                   <button
                     type="button"
-                    className="text-xs text-brand-600 hover:text-brand-700 font-medium transition-colors"
+                    className="btn-primary"
                     onClick={goToReview}
                     disabled={persisting || !recordId}
                   >
-                    {persisting ? "טוען..." : "המשך לסיכום →"}
+                    {persisting ? "טוען..." : "המשך לסיכום"}
                   </button>
                 </div>
               </>
+            )}
+
+            {/* If no intake yet and no error and not thinking, show input */}
+            {!error && !intake && !thinking && (
+              <ChatInput
+                placeholder="כתבו כאן את פרטי הפנייה…"
+                onSend={sendTurn}
+                busy={false}
+                disabled={false}
+              />
             )}
           </div>
         )}
@@ -233,15 +276,9 @@ export default function NewRequest() {
 function HeroDescribe({
   onSend,
   disabled,
-  userId,
-  uploadedFiles,
-  onFilesChange,
 }: {
   onSend: (t: string) => void;
   disabled?: boolean;
-  userId: string;
-  uploadedFiles: RequestFile[];
-  onFilesChange: (files: RequestFile[]) => void;
 }) {
   return (
     <div className="text-center pt-8">
@@ -253,7 +290,7 @@ function HeroDescribe({
         הפנייה, סכום משוער, לוחות זמנים, מסמכים קיימים ומה כל צד אמור לתת או
         לקבל.
       </p>
-      <div className="max-w-2xl mx-auto space-y-3">
+      <div className="max-w-2xl mx-auto">
         <ChatInput
           size="hero"
           placeholder="כתבו כאן את פרטי הפנייה…"
@@ -261,19 +298,13 @@ function HeroDescribe({
           chips={HERO_CHIPS}
           disabled={disabled}
         />
-        {userId && (
-          <FileUpload
-            userId={userId}
-            requestId={null}
-            files={uploadedFiles}
-            onFilesChange={onFilesChange}
-          />
-        )}
       </div>
     </div>
   );
 }
 
+/** Build an empty intake response — used when the AI fails and the user
+ *  wants to proceed manually. The review screen lets them edit everything. */
 function makeEmptyIntake(description: string): IntakeResponse {
   return {
     intake_summary: {
@@ -300,6 +331,7 @@ function makeEmptyIntake(description: string): IntakeResponse {
       subcontractors: "unknown",
       supplier_terms_or_contract: "unknown",
       grant_related: "unknown",
+      urgency: "unknown",
       special_notes: [],
     },
     known_information_he: [],

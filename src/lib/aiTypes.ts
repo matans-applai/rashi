@@ -14,6 +14,8 @@ export type AgreementState = "new" | "existing" | "extension" | "unknown";
 
 export type Currency = "ILS" | "unknown";
 
+export type Urgency = "normal" | "urgent" | "critical" | "unknown";
+
 export type Topic =
   | "basic_details"
   | "commercial"
@@ -50,6 +52,7 @@ export interface IntakeSummary {
   subcontractors: YesNoUnknown;
   supplier_terms_or_contract: YesNoUnknown;
   grant_related: YesNoUnknown;
+  urgency: Urgency;
   special_notes: string[];
 }
 
