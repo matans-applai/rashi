@@ -127,15 +127,25 @@ Deno.serve(async (req) => {
   });
 
   try {
+    // Extract questions previously asked by the assistant
+    const userMessages = body.messages.filter((m) => m.role !== "system");
+    const askedQuestions = extractAskedQuestions(userMessages);
+
     // Build message array
-    const systemContent = buildSystemMessage(body.previous_intake ?? null);
+    const systemContent = buildSystemMessage(body.previous_intake ?? null, askedQuestions);
     const messages: ChatTurn[] = [
       { role: "system", content: systemContent },
-      ...body.messages.filter((m) => m.role !== "system"),
+      ...userMessages,
     ];
 
+    logRequest({
+      request_id: requestId,
+      action: "asked_questions_count",
+      turn_count: askedQuestions.length,
+    });
+
     // Call OpenAI with timeout and retry
-    const result = await callOpenAIWithRetry(apiKey, model, messages, requestId, startTime);
+    const result = await callOpenAIWithRetry(apiKey, model, messages, askedQuestions, requestId, startTime);
     return result;
   } catch (e) {
     const msg = String((e as Error)?.message ?? e);
@@ -151,9 +161,12 @@ Deno.serve(async (req) => {
 });
 
 // ---------------------------------------------------------------------------
-// Build system message with optional previous intake state
+// Build system message with optional previous intake state + asked questions
 // ---------------------------------------------------------------------------
-function buildSystemMessage(previousIntake: Record<string, unknown> | null): string {
+function buildSystemMessage(
+  previousIntake: Record<string, unknown> | null,
+  askedQuestions: string[],
+): string {
   let msg = INTAKE_SYSTEM_PROMPT;
   if (previousIntake) {
     msg += `\n\n--- PREVIOUS INTAKE STATE ---
@@ -167,7 +180,101 @@ Previous intake_summary:
 ${JSON.stringify(previousIntake, null, 2)}
 --- END PREVIOUS INTAKE STATE ---`;
   }
+  if (askedQuestions.length > 0) {
+    msg += `\n\n--- QUESTIONS ALREADY ASKED ---
+The following questions were already asked in previous assistant turns.
+You MUST NOT ask any of these again, even paraphrased.
+If the user answered with "לא יודע" / "לא ידוע" / "לא בטוח" / similar non-knowledge phrases — the answer is VALID. Set the field to "unknown" and move the topic to missing_information. DO NOT re-ask.
+
+Asked questions:
+${askedQuestions.map((q, i) => `${i + 1}. ${q}`).join("\n")}
+--- END QUESTIONS ALREADY ASKED ---`;
+  }
   return msg;
+}
+
+// ---------------------------------------------------------------------------
+// Extract questions that the assistant has already asked from chat history
+// ---------------------------------------------------------------------------
+function extractAskedQuestions(messages: ChatTurn[]): string[] {
+  const asked: string[] = [];
+  for (const m of messages) {
+    if (m.role !== "assistant") continue;
+    // Numbered list lines: "1. ...", "2) ...", etc.
+    const lines = m.content.split(/\r?\n/);
+    for (const line of lines) {
+      const trimmed = line.trim();
+      const numberedMatch = trimmed.match(/^\d+[.)]\s*(.+\?)\s*$/);
+      if (numberedMatch) {
+        asked.push(numberedMatch[1].trim());
+        continue;
+      }
+      // Also catch standalone question lines ending with ?
+      if (trimmed.endsWith("?") && trimmed.length > 8 && trimmed.length < 250) {
+        asked.push(trimmed);
+      }
+    }
+  }
+  // De-dup
+  return Array.from(new Set(asked));
+}
+
+// ---------------------------------------------------------------------------
+// Normalize a Hebrew question for similarity comparison
+// ---------------------------------------------------------------------------
+function normalizeQ(q: string): string {
+  return q
+    .replace(/[?!.,:;״"'״׳`()\[\]{}]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+// Topic keyword groups — questions hitting the same group are considered duplicates.
+const TOPIC_GROUPS: Record<string, string[]> = {
+  insurance: ["ביטוח", "פוליסה"],
+  comparison: ["השוואת הצעות", "השוואה", "מכרז", "הצעות נוספות", "ספקים נוספים מועמדים"],
+  signer: ["חותם", "מי חותם", "מורשה חתימה"],
+  amount: ["סכום", "מחיר", "תשלום", "תקציב"],
+  quote: ["הצעת מחיר", "הצעה במייל"],
+  supplier_name: ["מי הצד השני", "שם הספק", "שם הצד השני"],
+  timeline: ["לוח זמנים", "מתי", "תאריך"],
+  privacy: ["מידע אישי", "פרטיות", "מידע רגיש"],
+  subcontractors: ["ספקי משנה", "ספק משנה"],
+  partners: ["שותפים", "גופים נוספים"],
+};
+
+function questionTopic(q: string): string | null {
+  const n = normalizeQ(q);
+  for (const [topic, kws] of Object.entries(TOPIC_GROUPS)) {
+    for (const kw of kws) {
+      if (n.includes(kw.toLowerCase())) return topic;
+    }
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Deduplicate next_questions_he against previously asked questions
+// ---------------------------------------------------------------------------
+function dedupNextQuestions(
+  nextQuestions: string[],
+  askedQuestions: string[],
+): string[] {
+  if (nextQuestions.length === 0) return [];
+  const askedTopics = new Set(
+    askedQuestions.map(questionTopic).filter((t): t is string => t !== null),
+  );
+  const askedNormalized = new Set(askedQuestions.map(normalizeQ));
+
+  const filtered: string[] = [];
+  for (const q of nextQuestions) {
+    const topic = questionTopic(q);
+    if (topic && askedTopics.has(topic)) continue; // same topic → skip
+    if (askedNormalized.has(normalizeQ(q))) continue; // exact dup → skip
+    filtered.push(q);
+  }
+  return filtered;
 }
 
 // ---------------------------------------------------------------------------
@@ -177,6 +284,7 @@ async function callOpenAIWithRetry(
   apiKey: string,
   model: string,
   messages: ChatTurn[],
+  askedQuestions: string[],
   requestId: string,
   globalStart: number,
 ): Promise<Response> {
@@ -294,6 +402,39 @@ async function callOpenAIWithRetry(
           duration_ms: Date.now() - globalStart,
         });
         return errorResponse("AI_VALIDATION_ERROR", "Response missing required fields", 502, requestId, globalStart);
+      }
+
+      // ─── Post-processing: deduplicate next_questions_he ───
+      // Drop any question that hits a topic the assistant already asked about
+      // (e.g. insurance/comparison/signer). If everything was a duplicate, flip
+      // ready_for_final_summary so the UI moves to the approval phase instead
+      // of getting stuck in a question loop.
+      const rawNextQuestions = (parsed.next_questions_he as string[] | undefined) ?? [];
+      const dedupedQuestions = dedupNextQuestions(rawNextQuestions, askedQuestions);
+      const droppedCount = rawNextQuestions.length - dedupedQuestions.length;
+      if (droppedCount > 0) {
+        logRequest({
+          request_id: requestId,
+          action: "dedup_questions",
+          turn_count: droppedCount,
+        });
+      }
+      parsed.next_questions_he = dedupedQuestions;
+
+      // If we dropped EVERY question (all duplicates), force ready_for_final_summary=true
+      // and replace the assistant message with the summary handoff.
+      if (
+        rawNextQuestions.length > 0 &&
+        dedupedQuestions.length === 0 &&
+        !parsed.ready_for_final_summary
+      ) {
+        parsed.ready_for_final_summary = true;
+        parsed.assistant_message_he =
+          "אספתי מספיק מידע. הנה סיכום הפנייה — בדקו את הפרטים ואשרו, או כתבו תיקון.";
+        logRequest({
+          request_id: requestId,
+          action: "forced_ready_after_dedup",
+        });
       }
 
       // Ensure assistant_message_he includes questions if next_questions_he is non-empty
